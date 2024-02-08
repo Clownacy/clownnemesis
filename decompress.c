@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#define MAXIMUM_CODE_BITS 8
+
 typedef struct NybbleRun
 {
 	unsigned char exists;
@@ -29,7 +31,7 @@ typedef struct State
 	ClownNemesis_OutputCallback write_byte;
 	void *write_byte_user_data;
 
-	NybbleRun nybble_runs[1 << 8]; /* Because a code can only be a maximum of 8 bits. */
+	NybbleRun nybble_runs[1 << MAXIMUM_CODE_BITS];
 } State;
 
 static unsigned char ReadByte(State* const state)
@@ -88,7 +90,7 @@ static const NybbleRun* FindCode(State* const state)
 
 	do
 	{
-		if (total_code_bits == 8)
+		if (total_code_bits == MAXIMUM_CODE_BITS)
 			longjmp(state->jump_buffer, 1);
 
 		code <<= 1;
@@ -214,3 +216,5 @@ int ClownNemesis_Decompress(const ClownNemesis_InputCallback read_byte, const vo
 
 	return success;
 }
+
+#undef MAXIMUM_CODE_BITS
