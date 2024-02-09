@@ -330,85 +330,74 @@ static unsigned int TotalValidRuns(State* const state)
 	return total_valid_runs;
 }
 
-static void DoSplit(State* const state, const unsigned int bit, const unsigned int starting_sorted_nybble_run_index, const unsigned int total_occurrances)
+static void DoSplit(State* const state, const unsigned int starting_sorted_nybble_run_index, const unsigned int total_occurrances)
 {
 	NybbleRun* const first_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[starting_sorted_nybble_run_index]);
 
-	/* Update code. */
-	state->code <<= 1;
-	state->code |= bit;
-	++state->total_code_bits;
-
-	/* Reject codes that are too long or start with the reserved code. */
-	if (state->total_code_bits < 9)
+	/* If there is only one run left, then the code belongs to it. */
+	if (first_nybble_run->occurrances == total_occurrances)
 	{
-		/* Skip the reserved code (0x3F). */
-		if (state->total_code_bits == 6 && state->code == 0x3E)
+		first_nybble_run->code = state->code;
+		first_nybble_run->total_code_bits = state->total_code_bits;
+	}
+	/* Give up if we've reached the limit. */
+	else if (state->total_code_bits != 8)
+	{
+		/* This performs a Fano binary split, splitting the list of probabilities into two roughly-equal halves and recursing. */
+		unsigned int occurrance_accumulator;
+		unsigned int sorted_nybble_run_index;
+
+		const unsigned int halfway = total_occurrances / 2;
+
+		occurrance_accumulator = 0;
+
+		for (sorted_nybble_run_index = starting_sorted_nybble_run_index; ; ++sorted_nybble_run_index)
 		{
-			state->code <<= 1;
-			++state->total_code_bits;
-		}
+			const NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[sorted_nybble_run_index]);
+			const unsigned int occurrance_accumulator_next = occurrance_accumulator + nybble_run->occurrances;
 
-		/* If there is only one run left, then the code belongs to it. */
-		if (first_nybble_run->occurrances == total_occurrances)
-		{
-			first_nybble_run->code = state->code;
-			first_nybble_run->total_code_bits = state->total_code_bits;
-		}
-		else
-		{
-			/* This performs a Fano binary split, splitting the list of propabilities into two roughly-equal halves and recursing. */
-			unsigned int occurrance_accumulator;
-			unsigned int sorted_nybble_run_index;
-
-			const unsigned int halfway = total_occurrances / 2;
-
-			occurrance_accumulator = 0;
-
-			for (sorted_nybble_run_index = starting_sorted_nybble_run_index; ; ++sorted_nybble_run_index)
+			if (occurrance_accumulator_next > halfway)
 			{
-				const NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[sorted_nybble_run_index]);
-				const unsigned int occurrance_accumulator_next = occurrance_accumulator + nybble_run->occurrances;
+				const unsigned int delta_1 = halfway - occurrance_accumulator;
+				const unsigned int delta_2 = occurrance_accumulator_next - halfway;
 
-				if (occurrance_accumulator_next > halfway)
+				const unsigned int split_occurrance = delta_1 < delta_2 ? occurrance_accumulator : occurrance_accumulator_next;
+				const unsigned int split_index = delta_1 < delta_2 ? sorted_nybble_run_index : sorted_nybble_run_index + 1;
+
+				state->code <<= 1;
+				++state->total_code_bits;
+
+				/* Skip the reserved code (0x3F). */
+				if (state->total_code_bits == 6 && state->code == 0x3E)
 				{
-					const unsigned int delta_1 = halfway - occurrance_accumulator;
-					const unsigned int delta_2 = occurrance_accumulator_next - halfway;
-
-					if (delta_1 < delta_2)
-					{
-					#ifdef CLOWNNEMESIS_DEBUG
-						fprintf(stderr, "Splitting left 0 %d/%d/%d.\n", starting_sorted_nybble_run_index, occurrance_accumulator, total_occurrances);
-					#endif
-						DoSplit(state, 0, starting_sorted_nybble_run_index, occurrance_accumulator);
-					#ifdef CLOWNNEMESIS_DEBUG
-						fprintf(stderr, "Splitting left 1 %d/%d/%d.\n", starting_sorted_nybble_run_index, occurrance_accumulator, total_occurrances);
-					#endif
-						DoSplit(state, 1, sorted_nybble_run_index, total_occurrances - occurrance_accumulator);
-					}
-					else
-					{
-					#ifdef CLOWNNEMESIS_DEBUG
-						fprintf(stderr, "Splitting right 0 %d/%d/%d.\n", starting_sorted_nybble_run_index, occurrance_accumulator_next, total_occurrances);
-					#endif
-						DoSplit(state, 0, starting_sorted_nybble_run_index, occurrance_accumulator_next);
-					#ifdef CLOWNNEMESIS_DEBUG
-						fprintf(stderr, "Splitting right 1 %d/%d/%d.\n", starting_sorted_nybble_run_index, occurrance_accumulator_next, total_occurrances);
-					#endif
-						DoSplit(state, 1, sorted_nybble_run_index + 1, total_occurrances - occurrance_accumulator_next);
-					}
-
-					break;
+					state->code <<= 1;
+					++state->total_code_bits;
 				}
 
-				occurrance_accumulator = occurrance_accumulator_next;
+				/* Do bit 0. */
+			#ifdef CLOWNNEMESIS_DEBUG
+				fprintf(stderr, "Splitting 0 %d/%d/%d.\n", starting_sorted_nybble_run_index, split_occurrance, total_occurrances);
+			#endif
+				DoSplit(state, starting_sorted_nybble_run_index, split_occurrance);
+
+				/* Do bit 1. */
+				state->code |= 1;
+
+			#ifdef CLOWNNEMESIS_DEBUG
+				fprintf(stderr, "Splitting 1 %d/%d/%d.\n", starting_sorted_nybble_run_index, split_occurrance, total_occurrances);
+			#endif
+				DoSplit(state, split_index, total_occurrances - split_occurrance);
+
+				/* Revert. */
+				state->code >>= 1;
+				--state->total_code_bits;
+
+				break;
 			}
+
+			occurrance_accumulator = occurrance_accumulator_next;
 		}
 	}
-
-	/* Revert code. */
-	state->code >>= 1;
-	--state->total_code_bits;
 }
 
 static void ComputeCodesFano(State* const state)
@@ -416,8 +405,8 @@ static void ComputeCodesFano(State* const state)
 	ComputeSortedRuns(state, state->nybble_runs_sorted);
 
 	state->code = 0;
-	state->total_code_bits = -1;
-	DoSplit(state, 0, 0, TotalValidRuns(state));
+	state->total_code_bits = 0;
+	DoSplit(state, 0, TotalValidRuns(state));
 }
 
 #endif
