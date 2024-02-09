@@ -288,7 +288,7 @@ static void EmitCodeTable(State* const state)
 
 	ComputeAccumulatedOccurrances(state);
 
-	/* Recalculate the code lengths, using the computed val */
+	/* Compute the codes using the above total and the accumulated occurrances. */
 	IterateNybbleRuns(state, ComputeCodes);
 
 	/* Finally, emit the code table. */
