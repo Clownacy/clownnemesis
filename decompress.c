@@ -15,7 +15,6 @@
 
 typedef struct NybbleRun
 {
-	unsigned char exists; /* TODO: This flag is not necessary: just check 'length' instead. */
 	unsigned char total_code_bits;
 	unsigned char value;
 	unsigned char length;
@@ -69,6 +68,11 @@ static unsigned int PopBits(State* const state, const unsigned int total_bits)
 	return value;
 }
 
+static cc_bool NybbleRunExists(const NybbleRun* const nybble_run)
+{
+	return nybble_run->length != 0;
+}
+
 static const NybbleRun* FindCode(State* const state)
 {
 	unsigned int code, total_code_bits;
@@ -91,7 +95,7 @@ static const NybbleRun* FindCode(State* const state)
 		++total_code_bits;
 		nybble_run = &state->nybble_runs[code];
 	}
-	while (!((nybble_run->exists && nybble_run->total_code_bits == total_code_bits) || code == 0x3F));
+	while (!((NybbleRunExists(nybble_run) && nybble_run->total_code_bits == total_code_bits) || code == 0x3F));
 
 	return code == 0x3F ? NULL : nybble_run;
 }
@@ -156,7 +160,6 @@ static void ProcessCodeTable(State* const state)
 			const unsigned char code = ReadByte(&state->common);
 
 			NybbleRun* const nybble_run = &state->nybble_runs[code];
-			nybble_run->exists = 1;
 			nybble_run->total_code_bits = total_code_bits;
 			nybble_run->value = nybble_run_value;
 			nybble_run->length = run_length;
@@ -247,7 +250,7 @@ int ClownNemesis_Decompress(const ClownNemesis_InputCallback read_byte, const vo
 			{
 				NybbleRun* const nybble_run = &state.nybble_runs[i];
 
-				if (nybble_run->exists)
+				if (NybbleRunExists(nybble_run))
 				{
 					unsigned int j;
 
