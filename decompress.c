@@ -1,7 +1,5 @@
 #include "decompress.h"
 
-#define CLOWNNEMESIS_DEBUG
-
 #include <setjmp.h>
 #include <stddef.h>
 #ifdef CLOWNNEMESIS_DEBUG

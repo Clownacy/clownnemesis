@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.0...3.28.3)
 
+option(CLOWNNEMESIS_DEBUG "Enable debug prints." OFF)
+
 project(clownnemesis LANGUAGES C)
 
 add_library(clownnemesis STATIC
@@ -11,6 +13,10 @@ add_library(clownnemesis STATIC
 	"decompress.c"
 	"decompress.h"
 )
+
+if(CLOWNNEMESIS_DEBUG)
+	target_compile_definitions(clownnemesis PRIVATE CLOWNNEMESIS_DEBUG)
+endif()
 
 add_executable(clownnemesis-tool
 	"tool.c"

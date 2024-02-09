@@ -1,7 +1,5 @@
 #include "compress.h"
 
-#define CLOWNNEMESIS_DEBUG
-
 #ifdef CLOWNNEMESIS_DEBUG
 #include <stdio.h>
 #endif
