@@ -309,6 +309,27 @@ static void ComputeCodesShannon(State* const state)
 
 #ifndef SHANNON_CODING
 
+static unsigned int TotalValidRuns(State* const state)
+{
+	unsigned int total_valid_runs;
+	unsigned int i;
+
+	total_valid_runs = 0;
+
+	for (i = 0; i < CC_COUNT_OF(state->nybble_runs_sorted); ++i)
+	{
+		NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[i]);
+
+		/* We only want runs that occur 3 or more times. */
+		if (nybble_run->occurrances < 3)
+			break;
+
+		total_valid_runs += nybble_run->occurrances;
+	}
+
+	return total_valid_runs;
+}
+
 static void DoSplit(State* const state, const unsigned int bit, const unsigned int starting_sorted_nybble_run_index, const unsigned int total_occurrances)
 {
 	NybbleRun* const first_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[starting_sorted_nybble_run_index]);
@@ -319,8 +340,15 @@ static void DoSplit(State* const state, const unsigned int bit, const unsigned i
 	++state->total_code_bits;
 
 	/* Reject codes that are too long or start with the reserved code. */
-	if (state->total_code_bits < 9 && (state->total_code_bits != 6 || state->code != 0x3F))
+	if (state->total_code_bits < 9)
 	{
+		/* Skip the reserved code (0x3F). */
+		if (state->total_code_bits == 6 && state->code == 0x3E)
+		{
+			state->code <<= 1;
+			++state->total_code_bits;
+		}
+
 		/* If there is only one run left, then the code belongs to it. */
 		if (first_nybble_run->occurrances == total_occurrances)
 		{
@@ -389,7 +417,7 @@ static void ComputeCodesFano(State* const state)
 
 	state->code = 0;
 	state->total_code_bits = -1;
-	DoSplit(state, 0, 0, state->total_runs);
+	DoSplit(state, 0, 0, TotalValidRuns(state));
 }
 
 #endif
