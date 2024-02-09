@@ -364,6 +364,7 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 				const unsigned int split_occurrance = delta_1 < delta_2 ? occurrance_accumulator : occurrance_accumulator_next;
 				const unsigned int split_index = delta_1 < delta_2 ? sorted_nybble_run_index : sorted_nybble_run_index + 1;
 
+				/* Skip the reserved code (0x3F). */
 				const cc_bool skip_reserved = state->total_code_bits == 5 && state->code == 0x1F;
 				const unsigned int bits = skip_reserved ? 2 : 1;
 
