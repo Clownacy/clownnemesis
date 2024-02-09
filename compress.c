@@ -12,9 +12,20 @@
 /* TODO: Fano coding. */
 /* TODO: Huffman coding. */
 
+/* If enabled, uses the inferior Shannon Coding instead of Fano Coding. */
+#define SHANNON_CODING
+
+#define MAXIMUM_RUN_NYBBLE 0x10
+#define MAXIMUM_RUN_LENGTH 8
+
+typedef unsigned char NybbleRunsIndex[MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH];
+
 typedef struct NybbleRun
 {
-	unsigned int occurrances, occurrances_accumulated;
+	unsigned int occurrances;
+#ifdef SHANNON_CODING
+	unsigned int occurrances_accumulated;
+#endif
 	unsigned char code;
 	unsigned char total_code_bits;
 } NybbleRun;
@@ -23,7 +34,7 @@ typedef struct State
 {
 	StateCommon common;
 
-	NybbleRun nybble_runs[0x10][8];
+	NybbleRun nybble_runs[MAXIMUM_RUN_NYBBLE][MAXIMUM_RUN_LENGTH];
 
 	unsigned int total_runs;
 	unsigned int total_runs_with_codes;
@@ -107,19 +118,38 @@ static void EmitHeader(State* const state)
 	WriteByte(&state->common, (total_tiles >> 0) & 0xFF);
 }
 
-static unsigned int NextPowerOfTwo(unsigned int v)
+static void ComputeSortedRuns(State* const state, NybbleRunsIndex runs_reordered)
 {
-	/* All hail the glorious bit-twiddler! */
-	/* https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2 */
-	/* We only care about 16-bit here. */
-	v--;
-	v |= v >> 1;
-	v |= v >> 2;
-	v |= v >> 4;
-	v |= v >> 8;
-	v++;
+	unsigned int i;
+	cc_bool not_done;
 
-	return v;
+	for (i = 0; i < MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH; ++i)
+		runs_reordered[i] = i;
+
+	/* Sort from most occurring to least occurring. */
+	/* TODO: Anything better than bubblesort. */
+	do
+	{
+		not_done = cc_false;
+
+		for (i = 1; i < MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH; ++i)
+		{
+			const unsigned int previous_run_index = runs_reordered[i - 1];
+			const NybbleRun* const previous_nybble_run = &state->nybble_runs[previous_run_index / MAXIMUM_RUN_LENGTH][previous_run_index % MAXIMUM_RUN_LENGTH];
+
+			const unsigned int run_index = runs_reordered[i];
+			const NybbleRun* const nybble_run = &state->nybble_runs[run_index / MAXIMUM_RUN_LENGTH][run_index % MAXIMUM_RUN_LENGTH];
+
+			if (previous_nybble_run->occurrances < nybble_run->occurrances)
+			{
+				const unsigned int temp = runs_reordered[i - 1];
+				runs_reordered[i - 1] = runs_reordered[i];
+				runs_reordered[i] = temp;
+				not_done = cc_true;
+			}
+		}
+	}
+	while (not_done);
 }
 
 static void IterateNybbleRuns(State* const state, void (*callback)(State *state, unsigned int run_nybble, unsigned int run_length))
@@ -133,6 +163,27 @@ static void IterateNybbleRuns(State* const state, void (*callback)(State *state,
 		for (j = 0; j < CC_COUNT_OF(state->nybble_runs[i]); ++j)
 			callback(state, i, j + 1);
 	}
+}
+
+/******************/
+/* Shannon Coding */
+/******************/
+
+#ifdef SHANNON_CODING
+
+static unsigned int NextPowerOfTwo(unsigned int v)
+{
+	/* All hail the glorious bit-twiddler! */
+	/* https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2 */
+	/* We only care about 16-bit here. */
+	v--;
+	v |= v >> 1;
+	v |= v >> 2;
+	v |= v >> 4;
+	v |= v >> 8;
+	v++;
+
+	return v;
 }
 
 static unsigned int ComputeCodeLength(NybbleRun* const nybble_run, const unsigned int total_occurrances)
@@ -180,37 +231,10 @@ static void ComputePreliminaryCodeLengths(State* const state, const unsigned int
 static void ComputeAccumulatedOccurrances(State* const state)
 {
 	unsigned int i;
-	unsigned int runs_reordered[0x10 * 8];
-	cc_bool not_done;
+	NybbleRunsIndex runs_reordered;
 	unsigned int occurrances_accumulator;
 
-	for (i = 0; i < CC_COUNT_OF(runs_reordered); ++i)
-		runs_reordered[i] = i;
-
-	/* Sort from most occurring to least occurring. */
-	/* TODO: Anything better than bubblesort. */
-	do
-	{
-		not_done = cc_false;
-
-		for (i = 1; i < CC_COUNT_OF(runs_reordered); ++i)
-		{
-			const unsigned int previous_run_index = runs_reordered[i - 1];
-			const NybbleRun* const previous_nybble_run = &state->nybble_runs[previous_run_index / 8][previous_run_index % 8];
-
-			const unsigned int run_index = runs_reordered[i];
-			const NybbleRun* const nybble_run = &state->nybble_runs[run_index / 8][run_index % 8];
-
-			if (previous_nybble_run->occurrances < nybble_run->occurrances)
-			{
-				const unsigned int temp = runs_reordered[i - 1];
-				runs_reordered[i - 1] = runs_reordered[i];
-				runs_reordered[i] = temp;
-				not_done = cc_true;
-			}
-		}
-	}
-	while (not_done);
+	ComputeSortedRuns(state, runs_reordered);
 
 	/* Calculate the accumulated occurrances. */
 	occurrances_accumulator = 0;
@@ -218,7 +242,7 @@ static void ComputeAccumulatedOccurrances(State* const state)
 	for (i = 0; i < CC_COUNT_OF(runs_reordered); ++i)
 	{
 		const unsigned int run_index = runs_reordered[i];
-		NybbleRun* const nybble_run = &state->nybble_runs[run_index / 8][run_index % 8];
+		NybbleRun* const nybble_run = &state->nybble_runs[run_index / MAXIMUM_RUN_LENGTH][run_index % MAXIMUM_RUN_LENGTH];
 
 		if (nybble_run->total_code_bits != 0)
 		{
@@ -228,7 +252,7 @@ static void ComputeAccumulatedOccurrances(State* const state)
 	}
 }
 
-static void ComputeCodes(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+static void ComputeCode(State* const state, const unsigned int run_nybble, const unsigned int run_length)
 {
 	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
 
@@ -250,6 +274,41 @@ static void ComputeCodes(State* const state, const unsigned int run_nybble, cons
 		}
 	}
 }
+
+static void ComputeCodesShannon(State* const state)
+{
+	/* Compute preliminate code lengths and total the runs that have valid code lengths.
+	   We will use this total to produce even smaller codes later. */
+	IterateNybbleRuns(state, ComputePreliminaryCodeLengths);
+
+	ComputeAccumulatedOccurrances(state);
+
+	/* Compute the codes using the above total and the accumulated occurrances. */
+	IterateNybbleRuns(state, ComputeCode);
+}
+
+#endif
+
+/*************************/
+/* End of Shannon Coding */
+/*************************/
+
+/***************/
+/* Fano Coding */
+/***************/
+
+#ifndef SHANNON_CODING
+
+static void ComputeCodesFano(State* const state)
+{
+	
+}
+
+#endif
+
+/**********************/
+/* End of Fano Coding */
+/**********************/
 
 static void EmitCodeTableEntry(State* const state, const unsigned int run_nybble, const unsigned int run_length)
 {
@@ -282,14 +341,11 @@ static void EmitCodeTableEntry(State* const state, const unsigned int run_nybble
 
 static void EmitCodeTable(State* const state)
 {
-	/* Compute preliminate code lengths and total the runs that have valid code lengths.
-	   We will use this total to produce even smaller codes later. */
-	IterateNybbleRuns(state, ComputePreliminaryCodeLengths);
-
-	ComputeAccumulatedOccurrances(state);
-
-	/* Compute the codes using the above total and the accumulated occurrances. */
-	IterateNybbleRuns(state, ComputeCodes);
+#ifdef SHANNON_CODING
+	ComputeCodesShannon(state);
+#else
+	ComputeCodesFano(state);
+#endif
 
 	/* Finally, emit the code table. */
 	state->previous_nybble = 0xFF; /* Deliberately invalid. */
