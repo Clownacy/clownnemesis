@@ -268,7 +268,7 @@ static void ComputeCode(State* const state, const unsigned int run_nybble, const
 
 	if (nybble_run->total_code_bits != 0)
 	{
-		/* This length won't be too big since we culled the large ones ealier and these can only be smaller, not larger, than before. */
+		/* This length won't be too big since we culled the large ones earlier and these can only be smaller, not larger, than before. */
 		const unsigned int code_length = ComputeCodeLength(nybble_run, state->total_runs_with_codes);
 		const unsigned int code = (nybble_run->occurrances_accumulated << code_length) / state->total_runs_with_codes;
 
