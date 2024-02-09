@@ -1,21 +1,33 @@
 #include "decompress.h"
 
+#define CLOWNNEMESIS_DEBUG
+
 #include <setjmp.h>
 #include <stddef.h>
+#ifdef CLOWNNEMESIS_DEBUG
+#include <stdio.h>
+#endif
 #include <string.h>
+
+#include "common-internal.h"
 
 #define MAXIMUM_CODE_BITS 8
 
 typedef struct NybbleRun
 {
-	unsigned char exists;
+	unsigned char exists; /* TODO: This flag is not necessary: just check 'length' instead. */
 	unsigned char total_code_bits;
 	unsigned char value;
 	unsigned char length;
+	unsigned int seen;
 } NybbleRun;
 
 typedef struct State
 {
+	StateCommon common;
+
+	NybbleRun nybble_runs[1 << MAXIMUM_CODE_BITS];
+
 	unsigned long output_buffer, previous_output_buffer;
 	unsigned char output_buffer_nybbles_done;
 
@@ -24,31 +36,7 @@ typedef struct State
 
 	unsigned char bits_available;
 	unsigned char bits_buffer;
-
-	jmp_buf jump_buffer;
-	ClownNemesis_InputCallback read_byte;
-	void *read_byte_user_data;
-	ClownNemesis_OutputCallback write_byte;
-	void *write_byte_user_data;
-
-	NybbleRun nybble_runs[1 << MAXIMUM_CODE_BITS];
 } State;
-
-static unsigned char ReadByte(State* const state)
-{
-	const int value = state->read_byte(state->read_byte_user_data);
-
-	if (value == -1)
-		longjmp(state->jump_buffer, 1);
-
-	return value;
-}
-
-static void WriteByte(State* const state, const unsigned char byte)
-{
-	if (!state->write_byte(state->write_byte_user_data, byte))
-		longjmp(state->jump_buffer, 1);
-}
 
 static unsigned int PopBit(State* const state)
 {
@@ -57,7 +45,7 @@ static unsigned int PopBit(State* const state)
 	if (state->bits_available == 0)
 	{
 		state->bits_available = 8;
-		state->bits_buffer = ReadByte(state);
+		state->bits_buffer = ReadByte(&state->common);
 	}
 
 	--state->bits_available;
@@ -91,7 +79,12 @@ static const NybbleRun* FindCode(State* const state)
 	do
 	{
 		if (total_code_bits == MAXIMUM_CODE_BITS)
-			longjmp(state->jump_buffer, 1);
+		{
+		#ifdef CLOWNNEMESIS_DEBUG
+			fputs("Tried to find a code which did not exist.\n", stderr);
+		#endif
+			longjmp(state->common.jump_buffer, 1);
+		}
 
 		code <<= 1;
 		code |= PopBit(state);
@@ -115,7 +108,7 @@ static void OutputNybble(State* const state, const unsigned int nybble)
 		const unsigned long final_output = state->output_buffer ^ (state->xor_mode_enabled ? state->previous_output_buffer : 0);
 
 		for (i = 0; i < 4; ++i)
-			WriteByte(state, (final_output >> (4 - 1 - i) * 8) & 0xFF);
+			WriteByte(&state->common, (final_output >> (4 - 1 - i) * 8) & 0xFF);
 
 		state->previous_output_buffer = final_output;
 	}
@@ -131,35 +124,36 @@ static void OutputNybbles(State* const state, const unsigned int nybble, const u
 
 static void ProcessHeader(State* const state)
 {
-	const unsigned char header_byte_1 = ReadByte(state);
-	const unsigned char header_byte_2 = ReadByte(state);
+	const unsigned char header_byte_1 = ReadByte(&state->common);
+	const unsigned char header_byte_2 = ReadByte(&state->common);
 	const unsigned int header_word = (unsigned int)header_byte_1 << 8 | header_byte_2;
 
 	state->xor_mode_enabled = (header_word & 0x8000) != 0;
 	state->total_tiles = header_word & 0x7FFF;
 }
 
-static void GenerateCodeTable(State* const state)
+static void ProcessCodeTable(State* const state)
 {
 	unsigned char byte, nybble_run_value;
 
+	nybble_run_value = 0; /* Not necessary, but shuts up a compiler warning. */
+
 	memset(state->nybble_runs, 0, sizeof(state->nybble_runs));
 
-	byte = ReadByte(state);
-	nybble_run_value = 0; /* Not necessary, but shuts up a compiler warning. */
+	byte = ReadByte(&state->common);
 
 	while (byte != 0xFF)
 	{
 		if ((byte & 0x80) != 0)
 		{
 			nybble_run_value = byte & 0xF;
-			byte = ReadByte(state);
+			byte = ReadByte(&state->common);
 		}
 		else
 		{
 			const unsigned char run_length = ((byte >> 4) & 7) + 1;
 			const unsigned char total_code_bits = byte & 0xF;
-			const unsigned char code = ReadByte(state);
+			const unsigned char code = ReadByte(&state->common);
 
 			NybbleRun* const nybble_run = &state->nybble_runs[code];
 			nybble_run->exists = 1;
@@ -167,7 +161,20 @@ static void GenerateCodeTable(State* const state)
 			nybble_run->value = nybble_run_value;
 			nybble_run->length = run_length;
 
-			byte = ReadByte(state);
+		#ifdef CLOWNNEMESIS_DEBUG
+			{
+				unsigned int i;
+
+				fputs("Code ", stderr);
+
+				for (i = 0; i < 8; ++i)
+					fputc((code & 1 << (8 - 1 - i)) != 0 ? '1' : '0', stderr);
+				
+				fprintf(stderr, " of %d bits encodes nybble %X of length %d.\n", nybble_run->total_code_bits, nybble_run->value, nybble_run->length);
+			}
+		#endif
+
+			byte = ReadByte(&state->common);
 		}
 	}
 }
@@ -175,22 +182,46 @@ static void GenerateCodeTable(State* const state)
 static void ProcessCodes(State* const state)
 {
 	unsigned long nybbles_remaining;
+	unsigned int total_runs;
 
 	nybbles_remaining = state->total_tiles * (8 * 8);
+	total_runs = 0;
 
 	while (nybbles_remaining != 0)
 	{
-		const NybbleRun* const nybble_run = FindCode(state);
+		/* TODO: Undo this hack! */
+		NybbleRun* const nybble_run = (NybbleRun*)FindCode(state);
 		const unsigned int run_length = nybble_run != NULL ? nybble_run->length : PopBits(state, 3) + 1;
 		const unsigned int nybble = nybble_run != NULL ? nybble_run->value : PopBits(state, 4);
 
+		if (nybble_run != NULL)
+		{
+			++nybble_run->seen;
+			++total_runs;
+		}
+	#ifdef CLOWNNEMESIS_DEBUG
+		else
+		{
+			fprintf(stderr, "Reject found: nybble %X of length %d\n", nybble, run_length);
+		}
+	#endif
+
 		if (run_length > nybbles_remaining)
-			longjmp(state->jump_buffer, 1);
+		{
+		#ifdef CLOWNNEMESIS_DEBUG
+			fputs("Data was longer than header declared.\n", stderr);
+		#endif
+			longjmp(state->common.jump_buffer, 1);
+		}
 
 		OutputNybbles(state, nybble, run_length);
 
 		nybbles_remaining -= run_length;
 	}
+
+#ifdef CLOWNNEMESIS_DEBUG
+	fprintf(stderr, "Total runs: %d\n", total_runs);
+#endif
 }
 
 int ClownNemesis_Decompress(const ClownNemesis_InputCallback read_byte, const void* const read_byte_user_data, const ClownNemesis_OutputCallback write_byte, const void* const write_byte_user_data)
@@ -200,16 +231,36 @@ int ClownNemesis_Decompress(const ClownNemesis_InputCallback read_byte, const vo
 
 	success = 0;
 
-	state.read_byte = read_byte;
-	state.read_byte_user_data = (void*)read_byte_user_data;
-	state.write_byte = write_byte;
-	state.write_byte_user_data = (void*)write_byte_user_data;
+	InitialiseCommon(&state.common, read_byte, read_byte_user_data, write_byte, write_byte_user_data);
 
-	if (!setjmp(state.jump_buffer))
+	if (!setjmp(state.common.jump_buffer))
 	{
 		ProcessHeader(&state);
-		GenerateCodeTable(&state);
+		ProcessCodeTable(&state);
 		ProcessCodes(&state);
+
+	#ifdef CLOWNNEMESIS_DEBUG
+		{
+			unsigned int i;
+
+			for (i = 0; i < 1 << 8; ++i)
+			{
+				NybbleRun* const nybble_run = &state.nybble_runs[i];
+
+				if (nybble_run->exists)
+				{
+					unsigned int j;
+
+					fputs("Code ", stderr);
+
+					for (j = 0; j < 8; ++j)
+						fputc((i & 1 << (8 - 1 - j)) != 0 ? '1' : '0', stderr);
+					
+					fprintf(stderr, " of %d bits encodes nybble %X of length %d and was seen %d times.\n", nybble_run->total_code_bits, nybble_run->value, nybble_run->length, nybble_run->seen);
+				}
+			}
+		}
+	#endif
 
 		success = 1;
 	}
