@@ -313,6 +313,7 @@ static void DoSplit(State* const state, const unsigned int bit, const unsigned i
 {
 	NybbleRun* const first_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[starting_sorted_nybble_run_index]);
 
+	/* Update code. */
 	state->code <<= 1;
 	state->code |= bit;
 	++state->total_code_bits;
@@ -320,6 +321,7 @@ static void DoSplit(State* const state, const unsigned int bit, const unsigned i
 	/* Reject codes that are too long or start with the reserved code. */
 	if (state->total_code_bits < 9 && (state->total_code_bits != 6 || state->code != 0x3F))
 	{
+		/* If there is only one run left, then the code belongs to it. */
 		if (first_nybble_run->occurrances == total_occurrances)
 		{
 			first_nybble_run->code = state->code;
@@ -327,6 +329,7 @@ static void DoSplit(State* const state, const unsigned int bit, const unsigned i
 		}
 		else
 		{
+			/* This performs a Fano binary split, splitting the list of propabilities into two roughly-equal halves and recursing. */
 			unsigned int occurrance_accumulator;
 			unsigned int sorted_nybble_run_index;
 
@@ -375,6 +378,7 @@ static void DoSplit(State* const state, const unsigned int bit, const unsigned i
 		}
 	}
 
+	/* Revert code. */
 	state->code >>= 1;
 	--state->total_code_bits;
 }
