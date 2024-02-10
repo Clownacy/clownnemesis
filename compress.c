@@ -688,13 +688,17 @@ static void EmitCode(State* const state, const unsigned int nybble, const unsign
 
 	if (nybble_run->total_code_bits != 0)
 	{
+	#ifdef CLOWNNEMESIS_DEBUG
 		fprintf(stderr, "Emitting code %X of length %d for nybble %X of length %d.\n", nybble_run->code, nybble_run->total_code_bits, nybble, length);
+	#endif
 
 		WriteBits(state, nybble_run->code, nybble_run->total_code_bits);
 	}
 	else
 	{
+	#ifdef CLOWNNEMESIS_DEBUG
 		fprintf(stderr, "Emitting reject for nybble %X of length %d.\n", nybble, length);
+	#endif
 
 		/* This run doesn't have a code, so inline it. */
 		WriteBits(state, 0x3F, 6);

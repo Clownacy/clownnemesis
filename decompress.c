@@ -218,8 +218,9 @@ static void ProcessCodes(State* const state)
 		{
 			fputs("Reject", stderr);
 		}
-	#endif
+
 		fprintf(stderr, " found: nybble %X of length %d\n", nybble, run_length);
+	#endif
 
 		if (run_length > nybbles_remaining)
 		{
