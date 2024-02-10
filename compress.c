@@ -4,10 +4,10 @@
 /*#define SHANNON_CODING*/
 
 /* If enabled, uses Fano Coding. */
-/*#define FANO_CODING*/
+#define FANO_CODING
 
 /* If enabled, uses Huffman Coding. */
-#define HUFFMAN_CODING
+/*#define HUFFMAN_CODING*/
 
 #ifdef CLOWNNEMESIS_DEBUG
 #include <stdio.h>
