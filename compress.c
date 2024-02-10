@@ -21,6 +21,7 @@
 #include "common-internal.h"
 
 /* TODO: XOR mode. */
+/* TODO: Use the package-merge algorithm to improve Huffman encoding. */
 
 #define MAXIMUM_RUN_NYBBLE 0x10
 #define MAXIMUM_RUN_LENGTH 8
