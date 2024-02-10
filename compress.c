@@ -157,8 +157,8 @@ static void EmitHeader(State* const state)
 		longjmp(state->common.jump_buffer, 1);
 	}
 
-	WriteByte(&state->common, (total_tiles >> 8) & 0xFF);
-	WriteByte(&state->common, (total_tiles >> 0) & 0xFF);
+	WriteByte(&state->common, total_tiles >> 8);
+	WriteByte(&state->common, total_tiles & 0xFF);
 }
 
 static NybbleRun* NybbleRunFromIndex(State* const state, const unsigned int index)
