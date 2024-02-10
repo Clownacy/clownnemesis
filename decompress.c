@@ -16,7 +16,9 @@ typedef struct NybbleRun
 	unsigned char total_code_bits;
 	unsigned char value;
 	unsigned char length;
+#ifdef CLOWNNEMESIS_DEBUG
 	unsigned int seen;
+#endif
 } NybbleRun;
 
 typedef struct State
@@ -74,16 +76,15 @@ static cc_bool NybbleRunExists(const NybbleRun* const nybble_run)
 static const NybbleRun* FindCode(State* const state)
 {
 	unsigned int code, total_code_bits;
-	const NybbleRun *nybble_run;
 
 	code = total_code_bits = 0;
 
-	do
+	for (;;)
 	{
 		if (total_code_bits == MAXIMUM_CODE_BITS)
 		{
 		#ifdef CLOWNNEMESIS_DEBUG
-			fputs("Tried to find a code which did not exist.\n", stderr);
+			fprintf(stderr, "Tried to find a code which did not exist (0x%X).\n", code);
 		#endif
 			longjmp(state->common.jump_buffer, 1);
 		}
@@ -91,11 +92,20 @@ static const NybbleRun* FindCode(State* const state)
 		code <<= 1;
 		code |= PopBit(state);
 		++total_code_bits;
-		nybble_run = &state->nybble_runs[code];
-	}
-	while (!((NybbleRunExists(nybble_run) && nybble_run->total_code_bits == total_code_bits) || code == 0x3F));
 
-	return code == 0x3F ? NULL : nybble_run;
+		/* Detect inline data. */
+		if (total_code_bits == 6 && code == 0x3F)
+		{
+			return NULL;
+		}
+		else
+		{
+			const NybbleRun* const nybble_run = &state->nybble_runs[code << (8 - total_code_bits)];
+
+			if ((NybbleRunExists(nybble_run) && nybble_run->total_code_bits == total_code_bits))
+				return nybble_run;
+		}
+	}
 }
 
 static void OutputNybble(State* const state, const unsigned int nybble)
@@ -157,7 +167,7 @@ static void ProcessCodeTable(State* const state)
 			const unsigned char total_code_bits = byte & 0xF;
 			const unsigned char code = ReadByte(&state->common);
 
-			NybbleRun* const nybble_run = &state->nybble_runs[code];
+			NybbleRun* const nybble_run = &state->nybble_runs[code << (8 - total_code_bits)];
 			nybble_run->total_code_bits = total_code_bits;
 			nybble_run->value = nybble_run_value;
 			nybble_run->length = run_length;
@@ -197,15 +207,19 @@ static void ProcessCodes(State* const state)
 
 		if (nybble_run != NULL)
 		{
+		#ifdef CLOWNNEMESIS_DEBUG
+			fputs("Code", stderr);
 			++nybble_run->seen;
+		#endif
 			++total_runs;
 		}
 	#ifdef CLOWNNEMESIS_DEBUG
 		else
 		{
-			fprintf(stderr, "Reject found: nybble %X of length %d\n", nybble, run_length);
+			fputs("Reject", stderr);
 		}
 	#endif
+		fprintf(stderr, " found: nybble %X of length %d\n", nybble, run_length);
 
 		if (run_length > nybbles_remaining)
 		{
