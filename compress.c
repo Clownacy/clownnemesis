@@ -1,19 +1,7 @@
 #include "compress.h"
 
-/* If enabled, uses Shannon Coding. */
-/*#define SHANNON_CODING*/
-
-/* If enabled, uses Fano Coding. */
-#define FANO_CODING
-
-/* If enabled, uses Huffman Coding. */
-/*#define HUFFMAN_CODING*/
-
 #ifdef CLOWNNEMESIS_DEBUG
 #include <stdio.h>
-#endif
-#ifdef HUFFMAN_CODING
-#include <stdlib.h>
 #endif
 
 #include "clowncommon/clowncommon.h"
@@ -23,59 +11,76 @@
 /* TODO: XOR mode. */
 /* TODO: Use the package-merge algorithm to improve Huffman encoding. */
 
+/* Select a particular encoding algorithm. */
+/*#define SHANNON_CODING*/
+#define FANO_CODING /* Currently the most efficient. */
+/*#define HUFFMAN_CODING*/
+
 #define MAXIMUM_RUN_NYBBLE 0x10
 #define MAXIMUM_RUN_LENGTH 8
 
-typedef unsigned char NybbleRunsIndex[MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH];
+#if defined(SHANNON_CODING)
+	#define CODE_GENERATOR_NYBBLE_DATA \
+		unsigned int occurrances_accumulated;
+
+	#define CODE_GENERATOR_STATE \
+		unsigned int total_runs_with_codes;
+#elif defined(FANO_CODING)
+	#define CODE_GENERATOR_NYBBLE_DATA
+
+	#define CODE_GENERATOR_STATE \
+		NybbleRunsIndex nybble_runs_sorted; \
+		unsigned char code; \
+		unsigned char total_code_bits;
+
+	typedef unsigned char NybbleRunsIndex[MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH];
+#elif defined(HUFFMAN_CODING)
+	#include <stdlib.h>
+
+	#define CODE_GENERATOR_NYBBLE_DATA
+
+	#define CODE_GENERATOR_STATE \
+		Node node_pool[MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH * 2]; \
+		unsigned int leaf_read_index; \
+		unsigned int internal_read_index, internal_write_index; \
+		unsigned char code; \
+		unsigned char total_code_bits;
+
+	typedef struct Node
+	{
+		cc_bool is_leaf;
+		unsigned int occurrances;
+
+		union
+		{
+			struct
+			{
+				unsigned char left_child, right_child;
+			} internal;
+			struct
+			{
+				NybbleRun *nybble_run;
+			} leaf;
+		} shared;
+	} Node;
+#endif
 
 typedef struct NybbleRun
 {
 	unsigned int occurrances;
-#ifdef SHANNON_CODING
-	unsigned int occurrances_accumulated;
-#endif
+	CODE_GENERATOR_NYBBLE_DATA
 	unsigned char code;
 	unsigned char total_code_bits;
 } NybbleRun;
-
-#ifdef HUFFMAN_CODING
-typedef struct Node
-{
-	cc_bool is_leaf;
-	unsigned int occurrances;
-
-	union
-	{
-		struct
-		{
-			unsigned char left_child, right_child;
-		} internal;
-		struct
-		{
-			NybbleRun *nybble_run;
-		} leaf;
-	} shared;
-} Node;
-#endif
 
 typedef struct State
 {
 	StateCommon common;
 
 	NybbleRun nybble_runs[MAXIMUM_RUN_NYBBLE][MAXIMUM_RUN_LENGTH];
-#ifdef FANO_CODING
-	NybbleRunsIndex nybble_runs_sorted;
-#endif
-#ifdef HUFFMAN_CODING
-	Node node_pool[MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH * 2];
-	unsigned int leaf_read_index;
-	unsigned int internal_read_index, internal_write_index;
-#endif
+	CODE_GENERATOR_STATE
 
 	unsigned int total_runs;
-#ifdef SHANNON_CODING
-	unsigned int total_runs_with_codes;
-#endif
 	unsigned int nybbles_read;
 
 	unsigned char previous_nybble;
@@ -85,11 +90,6 @@ typedef struct State
 
 	unsigned char output_byte_buffer;
 	unsigned char output_bits_done;
-
-#if defined(FANO_CODING) || defined(HUFFMAN_CODING)
-	unsigned char code;
-	unsigned char total_code_bits;
-#endif
 } State;
 
 static int ReadNybble(State* const state)
