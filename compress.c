@@ -745,16 +745,21 @@ static void ComputeCodes(State* const state)
 
 static void ComputeCodesHuffman(State* const state)
 {
+	/* Create leaf nodes. */
 	IterateNybbleRuns(state, CreateLeafNode);
 
-	qsort(state->node_pool, MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH, sizeof(Node), CompareNodes);
+	/* Now sort them by their occurrances. */
+	qsort(state->node_pool, TOTAL_SYMBOLS, sizeof(Node), CompareNodes);
 
 	/* Find the first node with a decent probability. */
 	/* TODO: What if there aren't any? */
 	while (state->node_pool[state->leaf_read_index].occurrances < 3)
 		++state->leaf_read_index;
 
+	/* Compute code lengths. */
 	ComputeBestCodeLengths(state);
+
+	/* With the lengths, we can compute the codes. */
 	ComputeCodes(state);
 }
 
