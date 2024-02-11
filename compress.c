@@ -13,9 +13,9 @@
 /* TODO: XOR mode. */
 
 /* Select a particular encoding algorithm. */
-/*#define SHANNON_CODING*/
-/*#define FANO_CODING*/ /* Currently the most efficient. */
-#define HUFFMAN_CODING
+/*#define SHANNON_CODING*/ /* Produces the largest compressed data. */
+/*#define FANO_CODING*/ /* This is what Sega's compressor used. */
+#define HUFFMAN_CODING /* Produces the smallest compressed data. */
 
 #define MAXIMUM_RUN_NYBBLE 0x10
 #define MAXIMUM_RUN_LENGTH 8
