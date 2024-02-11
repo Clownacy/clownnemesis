@@ -45,10 +45,12 @@ typedef unsigned char NybbleRunsIndex[TOTAL_SYMBOLS];
 	#define CODE_GENERATOR_NYBBLE_DATA
 
 	#define CODE_GENERATOR_STATE \
+		/* Contains the leaf nodes (size: TOTAL_SYMBOLS), and two queues for the internal nodes (size: TOTAL_SYMBOLS * MAXIMUM_BITS). */ \
 		Node node_pool[TOTAL_SYMBOLS + TOTAL_SYMBOLS * MAXIMUM_BITS * 2]; \
 		unsigned int leaf_read_index; \
+		unsigned int total_bits; \
 		InternalBufferIndices internal[2]; \
-		unsigned char internal_buffer_flip_flop;
+		unsigned char internal_buffer_flip_flop; \
 
 	typedef struct InternalBufferIndices
 	{
@@ -530,6 +532,7 @@ static void ComputeTrees(State* const state)
 	const unsigned int starting_leaf_node_index = state->leaf_read_index;
 
 	/* Welcome to Hell. */
+	/* This is the heart of the package-merge algorithm. */
 	state->internal[0].read_index = state->internal[0].write_index = TOTAL_SYMBOLS;
 	state->internal[1].read_index = state->internal[1].write_index = TOTAL_SYMBOLS + TOTAL_SYMBOLS * MAXIMUM_BITS;
 
@@ -575,15 +578,89 @@ static void RecurseNode(State* const state, const Node* const node)
 	}
 }
 
+static void ResetCodeLength(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+{
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+
+	nybble_run->total_code_bits = 0;
+}
+
 static void ComputeCodeLengths(State* const state)
 {
 	unsigned int i;
 
-	/* Recurse through the generated trees and increment the code length of each leaf encountered. */
 	InternalBufferIndices* const internal_buffer = &state->internal[state->internal_buffer_flip_flop];
 
+	/* Reset the code lengths to 0, just in case. */
+	IterateNybbleRuns(state, ResetCodeLength);
+
+	/* Recurse through the generated trees and increment the code length of each leaf encountered. */
 	for (i = internal_buffer->read_index; i < internal_buffer->write_index; ++i)
 		RecurseNode(state, &state->node_pool[i]);
+}
+
+static void SumTotalBits(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+{
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+
+	if (nybble_run->total_code_bits != 0)
+	{
+		cc_bool is_the_first;
+		unsigned int i;
+
+		/* Find out if this will have the first code table entry with this nybble. */
+		is_the_first = cc_true;
+
+		for (i = 1; i < run_length; ++i)
+		{
+			if (state->nybble_runs[run_nybble][run_length - 1].total_code_bits != 0)
+			{
+				is_the_first = cc_false;
+				break;
+			}
+		}
+
+		/* The code table entry uses either 16 bits or 24 bits depending on whether it's the first with its nybble. */
+		state->total_bits += is_the_first ? 24 : 16;
+		state->total_bits += nybble_run->total_code_bits * nybble_run->occurrances;
+	}
+	else
+	{
+		/* An inlined nybble runs costs 13 bits. */
+		state->total_bits += (6 + 3 + 4) * nybble_run->occurrances;
+	}
+}
+
+static void ComputeBestCodeLengths(State* const state)
+{
+	unsigned int best_starting_leaf_read_index;
+	unsigned int best_total_bits;
+
+	/* Brute-force the optimal number of coded nybble runs. */
+	best_total_bits = (unsigned int)-1;
+
+	/* Gradually ignore nybble runs, starting with the rarest ones. */
+	for (; state->leaf_read_index < TOTAL_SYMBOLS - 1; ++state->leaf_read_index)
+	{
+		ComputeTrees(state);
+		ComputeCodeLengths(state);
+
+		/* Find out how many bits this number of coded nybble runs uses. */
+		state->total_bits = 0;
+		IterateNybbleRuns(state, SumTotalBits);
+
+		/* Track the number of coded nybble runs with the lowest number of bits. */
+		if (state->total_bits < best_total_bits)
+		{
+			best_total_bits = state->total_bits;
+			best_starting_leaf_read_index = state->leaf_read_index;
+		}
+	}
+
+	/* Now that we know the ideal number of coded nybble runs, use it to continue compression. */
+	state->leaf_read_index = best_starting_leaf_read_index;
+	ComputeTrees(state);
+	ComputeCodeLengths(state);
 }
 
 static cc_bool ComparisonCodeTotalBits(const NybbleRun* const nybble_run_1, const NybbleRun* const nybble_run_2)
@@ -596,20 +673,24 @@ static void ComputeCodes(State* const state)
 	NybbleRunsIndex runs_reordered;
 	unsigned int code, previous_code_length;
 	unsigned int i;
-	unsigned int total_code_bits_delta;
+	unsigned int total_code_bits_modifier;
 
+	/* Get a sorted list of the nybble runs, ordered by their total code bits. */
 	ComputeSortedRuns(state, runs_reordered, ComparisonCodeTotalBits);
 
 	code = -1;
-	total_code_bits_delta = 0;
+	total_code_bits_modifier = 0;
 
+	/* Ignore all of the nybble runs that don't have a code... */
 	for (i = 0; NybbleRunFromIndex(state, runs_reordered[i])->total_code_bits == 0; ++i){}
 
+	/* ..and iterate over the ones that do. */
 	for (; i < TOTAL_SYMBOLS; ++i)
 	{
 		unsigned int nybble_run_index = runs_reordered[i];
 		NybbleRun* const nybble_run = NybbleRunFromIndex(state, nybble_run_index);
 
+		/* What we're doing here is computing the 'canonical Huffman codes' from the code lengths. */
 		++code;
 
 		/* Prevent conflicting with the reserved inline prefix. */
@@ -617,12 +698,12 @@ static void ComputeCodes(State* const state)
 		{
 			code <<= 1;
 			++previous_code_length;
-			total_code_bits_delta = 1;
+			total_code_bits_modifier = 1;
 
 			assert(previous_code_length != 9);
 		}
 
-		nybble_run->total_code_bits += total_code_bits_delta;
+		nybble_run->total_code_bits += total_code_bits_modifier;
 
 		if (nybble_run->total_code_bits != previous_code_length)
 		{
@@ -661,11 +742,11 @@ static void ComputeCodesHuffman(State* const state)
 	while (state->node_pool[state->leaf_read_index].occurrances < 3)
 		++state->leaf_read_index;
 
-	ComputeTrees(state);
-	ComputeCodeLengths(state);
+	ComputeBestCodeLengths(state);
+
+	/* TODO: Sort the nybble runs again so that the ones that get bumped to 8 bits are the least common. */
+
 	ComputeCodes(state);
-	/*state->code = state->total_code_bits = 0;
-	RecurseNode(state, ComputeHuffmanTree(state));*/
 }
 
 #endif
@@ -781,6 +862,7 @@ static void EmitCode(State* const state, const unsigned int nybble, const unsign
 
 static void EmitCodes(State* const state)
 {
+	/* TODO: Use clownlzss to find the most efficient way of encoding the uncompressed data using the available codes. */
 	FindRuns(state, EmitCode);
 
 	/* Output any codes that haven't yet been flushed. */
