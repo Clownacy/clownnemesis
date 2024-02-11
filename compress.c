@@ -637,6 +637,8 @@ static void ComputeBestCodeLengths(State* const state)
 	unsigned int best_total_bits;
 
 	/* Brute-force the optimal number of coded nybble runs. */
+	/* We do this because, the more coded nybble runs there are, the more likely it is that common nybble runs will be
+	   given longer codes, leading to larger compressed data, so it might be beneficial to use fewer coded nybble runs. */
 	best_total_bits = (unsigned int)-1;
 
 	/* Gradually ignore nybble runs, starting with the rarest ones. */
@@ -665,7 +667,12 @@ static void ComputeBestCodeLengths(State* const state)
 
 static cc_bool ComparisonCodeTotalBits(const NybbleRun* const nybble_run_1, const NybbleRun* const nybble_run_2)
 {
-	return nybble_run_1->total_code_bits < nybble_run_2->total_code_bits;
+	/* Sort by total code bits first, and sort by occurrance second. */
+	/* We sort by occurrance so that the nybble runs that get bumped to 8 bits are the least common, costing the least space. */
+	if (nybble_run_1->total_code_bits == nybble_run_2->total_code_bits)
+		return nybble_run_1->occurrances > nybble_run_2->occurrances;
+	else
+		return nybble_run_1->total_code_bits < nybble_run_2->total_code_bits;
 }
 
 static void ComputeCodes(State* const state)
@@ -743,9 +750,6 @@ static void ComputeCodesHuffman(State* const state)
 		++state->leaf_read_index;
 
 	ComputeBestCodeLengths(state);
-
-	/* TODO: Sort the nybble runs again so that the ones that get bumped to 8 bits are the least common. */
-
 	ComputeCodes(state);
 }
 
