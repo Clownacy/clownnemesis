@@ -11,7 +11,6 @@
 #include "common-internal.h"
 
 /* TODO: XOR mode. */
-/* TODO: Use the package-merge algorithm to improve Huffman encoding. */
 
 /* Select a particular encoding algorithm. */
 /*#define SHANNON_CODING*/
@@ -195,6 +194,7 @@ static void ComputeSortedRuns(State* const state, NybbleRunsIndex runs_reordered
 		runs_reordered[i] = i;
 
 	/* Sort from most occurring to least occurring. */
+	/* This needs to be a stable sorting algorithm so that the Fano algorithm matches Sega's compressor. */
 	/* TODO: Anything better than bubblesort. */
 	do
 	{
@@ -741,11 +741,10 @@ static void ComputeCodesHuffman(State* const state)
 {
 	IterateNybbleRuns(state, CreateLeafNode);
 
-	/* TODO: A stable sorting function. */
 	qsort(state->node_pool, MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH, sizeof(Node), CompareNodes);
 
-	/* TODO: What if there aren't any? */
 	/* Find the first node with a decent probability. */
+	/* TODO: What if there aren't any? */
 	while (state->node_pool[state->leaf_read_index].occurrances < 3)
 		++state->leaf_read_index;
 
