@@ -11,6 +11,8 @@
 #include "common-internal.h"
 
 /* TODO: XOR mode. */
+/* TODO: Empty files. */
+/* TODO: Files with only a single unique nybble run. */
 
 /* Select a particular encoding algorithm. */
 /*#define SHANNON_CODING*/ /* Produces the largest compressed data. */
