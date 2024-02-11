@@ -234,6 +234,8 @@ static void IterateNybbleRuns(State* const state, void (*callback)(State *state,
 /* Shannon Coding */
 /******************/
 
+/* https://en.wikipedia.org/wiki/Shannon%E2%80%93Fano_coding */
+
 #ifdef SHANNON_CODING
 
 static unsigned int NextPowerOfTwo(unsigned int v)
@@ -360,6 +362,8 @@ static void ComputeCodesShannon(State* const state)
 /***************/
 /* Fano Coding */
 /***************/
+
+/* https://en.wikipedia.org/wiki/Shannon%E2%80%93Fano_coding */
 
 #ifdef FANO_CODING
 
