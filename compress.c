@@ -104,75 +104,7 @@ typedef struct State
 	unsigned char output_bits_done;
 } State;
 
-static int ReadNybble(State* const state)
-{
-	if (state->nybble_reader_flip_flop)
-	{
-		state->input_nybble_buffer <<= 4;
-	}
-	else
-	{
-		const int value = ReadByte(&state->common);
-
-		if (value == CLOWNNEMESIS_EOF)
-			return CLOWNNEMESIS_EOF;
-
-		state->input_nybble_buffer = (unsigned char)value;
-	}
-
-	state->nybble_reader_flip_flop = !state->nybble_reader_flip_flop;
-	++state->nybbles_read;
-
-	return (state->input_nybble_buffer >> 4) & 0xF;
-}
-
-static void FindRuns(State* const state, void (*callback)(State *state, unsigned int nybble, unsigned int length))
-{
-	int new_nybble, previous_nybble, run_length;
-
-	new_nybble = ReadNybble(state);
-	run_length = 0;
-
-	while (new_nybble != CLOWNNEMESIS_EOF)
-	{
-		++run_length;
-
-		previous_nybble = new_nybble;
-		new_nybble = ReadNybble(state);
-
-		if (run_length == 8 || new_nybble != previous_nybble)
-		{
-			callback(state, previous_nybble, run_length);
-			run_length = 0;
-		}
-	}
-}
-
-static void EmitHeader(State* const state)
-{
-	/* TODO: XOR mode. */
-	const unsigned int nybbles_per_tile = 8 * 8;
-	const unsigned int total_tiles = state->nybbles_read / nybbles_per_tile;
-
-	if (state->nybbles_read % nybbles_per_tile != 0)
-	{
-	#ifdef CLOWNNEMESIS_DEBUG
-		fputs("Input data size is not a multiple of 0x20 bytes.\n", stderr);
-	#endif
-		longjmp(state->common.jump_buffer, 1);
-	}
-	else if (total_tiles > 0x7FFF)
-	{
-	#ifdef CLOWNNEMESIS_DEBUG
-		fputs("Input data is larger than the header allows.\n", stderr);
-	#endif
-		longjmp(state->common.jump_buffer, 1);
-	}
-
-	WriteByte(&state->common, total_tiles >> 8);
-	WriteByte(&state->common, total_tiles & 0xFF);
-}
-
+/* TODO: Just replace this with using direct pointers. */
 static NybbleRun* NybbleRunFromIndex(State* const state, const unsigned int index)
 {
 	return &state->nybble_runs[index / CC_COUNT_OF(state->nybble_runs[0])][index % CC_COUNT_OF(state->nybble_runs[0])];
@@ -347,6 +279,7 @@ static void ComputeCodesShannon(State* const state)
 {
 	/* Compute preliminate code lengths and total the runs that have valid code lengths.
 	   We will use this total to produce even smaller codes later. */
+	state->total_runs_with_codes = 0;
 	IterateNybbleRuns(state, ComputePreliminaryCodeLengths);
 
 	ComputeAccumulatedOccurrances(state);
@@ -681,7 +614,7 @@ static cc_bool ComparisonCodeTotalBits(const NybbleRun* const nybble_run_1, cons
 		return nybble_run_1->total_code_bits < nybble_run_2->total_code_bits;
 }
 
-static void ComputeCodes(State* const state)
+static void ComputeCodesFromLengths(State* const state)
 {
 	NybbleRunsIndex runs_reordered;
 	unsigned int code, previous_code_length;
@@ -760,7 +693,7 @@ static void ComputeCodesHuffman(State* const state)
 	ComputeBestCodeLengths(state);
 
 	/* With the lengths, we can compute the codes. */
-	ComputeCodes(state);
+	ComputeCodesFromLengths(state);
 }
 
 #endif
@@ -768,6 +701,108 @@ static void ComputeCodesHuffman(State* const state)
 /*************************/
 /* End of Huffman Coding */
 /*************************/
+
+static int ReadNybble(State* const state)
+{
+	if (state->nybble_reader_flip_flop)
+	{
+		state->input_nybble_buffer <<= 4;
+	}
+	else
+	{
+		const int value = ReadByte(&state->common);
+
+		if (value == CLOWNNEMESIS_EOF)
+			return CLOWNNEMESIS_EOF;
+
+		state->input_nybble_buffer = (unsigned char)value;
+	}
+
+	state->nybble_reader_flip_flop = !state->nybble_reader_flip_flop;
+	++state->nybbles_read;
+
+	return (state->input_nybble_buffer >> 4) & 0xF;
+}
+
+static void FindRuns(State* const state, void (*callback)(State *state, unsigned int nybble, unsigned int length))
+{
+	int new_nybble, previous_nybble, run_length;
+
+	new_nybble = ReadNybble(state);
+	run_length = 0;
+
+	while (new_nybble != CLOWNNEMESIS_EOF)
+	{
+		++run_length;
+
+		previous_nybble = new_nybble;
+		new_nybble = ReadNybble(state);
+
+		if (run_length == 8 || new_nybble != previous_nybble)
+		{
+			callback(state, previous_nybble, run_length);
+			run_length = 0;
+		}
+	}
+}
+
+static void LogOccurrance(State* const state, const unsigned int nybble, const unsigned int length)
+{
+	++state->nybble_runs[nybble][length - 1].occurrances;
+	++state->total_runs;
+}
+
+static void ResetOccurrances(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+{
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+
+	nybble_run->occurrances = 0;
+}
+
+static void ComputeCodes(State* const state)
+{
+	/* Reset occurances to 0. */
+	IterateNybbleRuns(state, ResetOccurrances);
+
+	/* Count how many times each nybble run occurs in the source data. */
+	/* Also count how many nybbles (bytes) are in the input data. */
+	state->nybbles_read = 0;
+	FindRuns(state, LogOccurrance);
+
+	/* Do the coding-specific tasks. */
+#if defined(SHANNON_CODING)
+	ComputeCodesShannon(state);
+#elif defined(FANO_CODING)
+	ComputeCodesFano(state);
+#elif defined(HUFFMAN_CODING)
+	ComputeCodesHuffman(state);
+#endif
+}
+
+static void EmitHeader(State* const state)
+{
+	/* TODO: XOR mode. */
+	const unsigned int nybbles_per_tile = 8 * 8;
+	const unsigned int total_tiles = state->nybbles_read / nybbles_per_tile;
+
+	if (state->nybbles_read % nybbles_per_tile != 0)
+	{
+	#ifdef CLOWNNEMESIS_DEBUG
+		fputs("Input data size is not a multiple of 0x20 bytes.\n", stderr);
+	#endif
+		longjmp(state->common.jump_buffer, 1);
+	}
+	else if (total_tiles > 0x7FFF)
+	{
+	#ifdef CLOWNNEMESIS_DEBUG
+		fputs("Input data is larger than the header allows.\n", stderr);
+	#endif
+		longjmp(state->common.jump_buffer, 1);
+	}
+
+	WriteByte(&state->common, total_tiles >> 8);
+	WriteByte(&state->common, total_tiles & 0xFF);
+}
 
 static void EmitCodeTableEntry(State* const state, const unsigned int run_nybble, const unsigned int run_length)
 {
@@ -800,14 +835,6 @@ static void EmitCodeTableEntry(State* const state, const unsigned int run_nybble
 
 static void EmitCodeTable(State* const state)
 {
-#if defined(SHANNON_CODING)
-	ComputeCodesShannon(state);
-#elif defined(FANO_CODING)
-	ComputeCodesFano(state);
-#elif defined(HUFFMAN_CODING)
-	ComputeCodesHuffman(state);
-#endif
-
 	/* Finally, emit the code table. */
 	state->previous_nybble = 0xFF; /* Deliberately invalid. */
 	IterateNybbleRuns(state, EmitCodeTableEntry);
@@ -821,12 +848,6 @@ static void EmitCodeTable(State* const state)
 	fprintf(stderr, "Total runs with codes: %d\n", state->total_runs_with_codes);
 #endif
 #endif
-}
-
-static void LogOccurrance(State* const state, const unsigned int nybble, const unsigned int length)
-{
-	++state->nybble_runs[nybble][length - 1].occurrances;
-	++state->total_runs;
 }
 
 static void WriteBit(State* const state, const unsigned int bit)
@@ -896,7 +917,8 @@ int ClownNemesis_Compress(const ClownNemesis_InputCallback read_byte, const void
 
 	if (!setjmp(state.common.jump_buffer))
 	{
-		FindRuns(&state, LogOccurrance);
+		ComputeCodes(&state);
+
 		EmitHeader(&state);
 		EmitCodeTable(&state);
 		EmitCodes(&state);
