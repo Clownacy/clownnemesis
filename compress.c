@@ -785,6 +785,7 @@ static void EmitHeader(State* const state)
 	const unsigned int bytes_per_tile = 0x20;
 	const unsigned int total_tiles = state->bytes_read / bytes_per_tile;
 
+	/* TODO: Maybe do this check in ComputeCodes? */
 	if (state->bytes_read % bytes_per_tile != 0)
 	{
 	#ifdef CLOWNNEMESIS_DEBUG
