@@ -13,11 +13,14 @@
 
 /* Select a particular encoding algorithm. */
 /*#define SHANNON_CODING*/
-#define FANO_CODING /* Currently the most efficient. */
-/*#define HUFFMAN_CODING*/
+/*#define FANO_CODING*/ /* Currently the most efficient. */
+#define HUFFMAN_CODING
 
 #define MAXIMUM_RUN_NYBBLE 0x10
 #define MAXIMUM_RUN_LENGTH 8
+
+#define TOTAL_SYMBOLS (MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH)
+#define MAXIMUM_BITS 8
 
 #if defined(SHANNON_CODING)
 	#define CODE_GENERATOR_NYBBLE_DATA \
@@ -32,19 +35,21 @@
 		NybbleRunsIndex nybble_runs_sorted; \
 		unsigned char code; \
 		unsigned char total_code_bits;
-
-	typedef unsigned char NybbleRunsIndex[MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH];
 #elif defined(HUFFMAN_CODING)
 	#include <stdlib.h>
 
 	#define CODE_GENERATOR_NYBBLE_DATA
 
 	#define CODE_GENERATOR_STATE \
-		Node node_pool[MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH * 2]; \
+		Node node_pool[TOTAL_SYMBOLS + TOTAL_SYMBOLS * MAXIMUM_BITS * 2]; \
 		unsigned int leaf_read_index; \
-		unsigned int internal_read_index, internal_write_index; \
-		unsigned char code; \
-		unsigned char total_code_bits;
+		InternalBufferIndices internal[2]; \
+		unsigned char internal_buffer_flip_flop;
+
+	typedef struct InternalBufferIndices
+	{
+		unsigned int read_index, write_index;
+	} InternalBufferIndices;
 
 	typedef struct Node
 	{
@@ -55,11 +60,11 @@
 		{
 			struct
 			{
-				unsigned char left_child, right_child;
+				unsigned short left_child, right_child;
 			} internal;
 			struct
 			{
-				NybbleRun *nybble_run;
+				struct NybbleRun *nybble_run;
 			} leaf;
 		} shared;
 	} Node;
@@ -91,6 +96,8 @@ typedef struct State
 	unsigned char output_byte_buffer;
 	unsigned char output_bits_done;
 } State;
+
+typedef unsigned char NybbleRunsIndex[TOTAL_SYMBOLS];
 
 static int ReadNybble(State* const state)
 {
@@ -166,7 +173,7 @@ static NybbleRun* NybbleRunFromIndex(State* const state, const unsigned int inde
 	return &state->nybble_runs[index / CC_COUNT_OF(state->nybble_runs[0])][index % CC_COUNT_OF(state->nybble_runs[0])];
 }
 
-static void ComputeSortedRuns(State* const state, NybbleRunsIndex runs_reordered)
+static void ComputeSortedRuns(State* const state, NybbleRunsIndex runs_reordered, cc_bool (*comparison)(const NybbleRun *nybble_run_1, const NybbleRun *nybble_run_2))
 {
 	unsigned int i;
 	cc_bool not_done;
@@ -185,7 +192,7 @@ static void ComputeSortedRuns(State* const state, NybbleRunsIndex runs_reordered
 			const NybbleRun* const previous_nybble_run = NybbleRunFromIndex(state, runs_reordered[i - 1]);
 			const NybbleRun* const nybble_run = NybbleRunFromIndex(state, runs_reordered[i]);
 
-			if (previous_nybble_run->occurrances < nybble_run->occurrances)
+			if (comparison(nybble_run, previous_nybble_run))
 			{
 				const unsigned int temp = runs_reordered[i - 1];
 				runs_reordered[i - 1] = runs_reordered[i];
@@ -473,17 +480,17 @@ static int CompareNodes(const void* const a, const void* const b)
 
 static unsigned int PopSmallestNode(State* const state)
 {
-	const unsigned int read_limit = MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH;
-	const unsigned int leaf_nodes_available = read_limit - state->leaf_read_index;
-	const unsigned int internal_nodes_available = state->internal_write_index - state->internal_read_index;
+	InternalBufferIndices* const input_internal = &state->internal[state->internal_buffer_flip_flop];
+	const unsigned int leaf_nodes_available = TOTAL_SYMBOLS - state->leaf_read_index;
+	const unsigned int internal_nodes_available = input_internal->write_index - input_internal->read_index;
 
 	if (leaf_nodes_available != 0 && internal_nodes_available != 0)
 	{
 		/* Prefer leaf nodes when equal to avoid long codes. */
-		if (state->node_pool[state->leaf_read_index].occurrances <= state->node_pool[state->internal_read_index].occurrances)
+		if (state->node_pool[state->leaf_read_index].occurrances <= state->node_pool[input_internal->read_index].occurrances)
 			return state->leaf_read_index++;
 		else
-			return state->internal_read_index++;
+			return input_internal->read_index++;
 	}
 	else if (leaf_nodes_available != 0)
 	{
@@ -491,7 +498,7 @@ static unsigned int PopSmallestNode(State* const state)
 	}
 	else if (internal_nodes_available != 0)
 	{
-		return state->internal_read_index++;
+		return input_internal->read_index++;
 	}
 	else
 	{
@@ -499,27 +506,42 @@ static unsigned int PopSmallestNode(State* const state)
 	}
 }
 
-static const Node* ComputeHuffmanTree(State* const state)
+static void ComputeTrees(State* const state)
 {
 	/* TODO: Handle there being no codeable nodes. */
+	const unsigned int starting_leaf_node_index = state->leaf_read_index;
+	const unsigned int starting_internal_node_index[2] = {TOTAL_SYMBOLS, TOTAL_SYMBOLS + TOTAL_SYMBOLS * MAXIMUM_BITS};
+
+	const unsigned int required_nodes = TOTAL_SYMBOLS - starting_leaf_node_index - 2;
 
 	/* Welcome to Hell. */
-	state->internal_read_index = state->internal_write_index = MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH;
+	state->internal[0].read_index = state->internal[0].write_index = starting_internal_node_index[0];
+	state->internal[1].read_index = state->internal[1].write_index = starting_internal_node_index[1];
 
 	for (;;)
 	{
+		InternalBufferIndices* const output_internal = &state->internal[state->internal_buffer_flip_flop ^ 1];
+
 		const unsigned int right_child = PopSmallestNode(state);
 		const unsigned int left_child = PopSmallestNode(state);
 
-		/* Is there is only one node left, then it is our root node. */
-		if (left_child == (unsigned int)-1)
-			return &state->node_pool[right_child];
+		if (left_child == (unsigned int)-1 || right_child == (unsigned int)-1)
+		{
+			state->leaf_read_index = starting_leaf_node_index;
 
-		state->node_pool[state->internal_write_index].is_leaf = cc_false;
-		state->node_pool[state->internal_write_index].occurrances = state->node_pool[left_child].occurrances + state->node_pool[right_child].occurrances;
-		state->node_pool[state->internal_write_index].shared.internal.left_child = left_child;
-		state->node_pool[state->internal_write_index].shared.internal.right_child = right_child;
-		++state->internal_write_index;
+			state->internal_buffer_flip_flop ^= 1;
+
+			if (output_internal->write_index - output_internal->read_index >= required_nodes)
+				break;
+
+			continue;
+		}
+
+		state->node_pool[output_internal->write_index].is_leaf = cc_false;
+		state->node_pool[output_internal->write_index].occurrances = state->node_pool[left_child].occurrances + state->node_pool[right_child].occurrances;
+		state->node_pool[output_internal->write_index].shared.internal.left_child = left_child;
+		state->node_pool[output_internal->write_index].shared.internal.right_child = right_child;
+		++output_internal->write_index;
 	}
 }
 
@@ -527,56 +549,84 @@ static void RecurseNode(State* const state, const Node* const node)
 {
 	if (node->is_leaf)
 	{
-		NybbleRun* const nybble_run = node->shared.leaf.nybble_run;
-
-		/* Prevent conflicting with the reserved code (0x3F). */
-		if (state->code == (1 << state->total_code_bits) - 1)
-		{
-			if (state->total_code_bits != 8)
-			{
-				nybble_run->code = state->code << 1;
-				nybble_run->total_code_bits = state->total_code_bits + 1;
-			}
-		}
-		else
-		{
-			nybble_run->code = state->code;
-			nybble_run->total_code_bits = state->total_code_bits;
-		}
+		++node->shared.leaf.nybble_run->total_code_bits;
 	}
-	/* Give up if we've reached the limit. */
-	else if (state->total_code_bits != 8)
+	else
 	{
-		const cc_bool skip_reserved = state->total_code_bits == 5 && state->code == 0x1F;
-
-		/* Extend the code. */
-		state->code <<= 1;
-		++state->total_code_bits;
-
-		/* Do bit 0. */
 		RecurseNode(state, &state->node_pool[node->shared.internal.left_child]);
-
-		/* Do bit 1. */
-		state->code |= 1;
-
-		/* Prevent conflicting with the reserved code (0x3F). */
-		if (skip_reserved)
-		{
-			state->code <<= 1;
-			++state->total_code_bits;
-		}
-
 		RecurseNode(state, &state->node_pool[node->shared.internal.right_child]);
+	}
+}
 
-		if (skip_reserved)
+static void ComputeCodeLengths(State* const state)
+{
+	unsigned int i;
+
+	InternalBufferIndices* const internal_buffer = &state->internal[state->internal_buffer_flip_flop];
+
+	for (i = internal_buffer->read_index; i < internal_buffer->write_index; ++i)
+		RecurseNode(state, &state->node_pool[i]);
+}
+
+static cc_bool ComparisonCodeTotalBits(const NybbleRun* const nybble_run_1, const NybbleRun* const nybble_run_2)
+{
+	return nybble_run_1->total_code_bits < nybble_run_2->total_code_bits;
+}
+
+static void ComputeCodes(State* const state)
+{
+	NybbleRunsIndex runs_reordered;
+	unsigned int code, previous_code_length;
+	unsigned int i;
+	unsigned int total_code_bits_delta;
+
+	ComputeSortedRuns(state, runs_reordered, ComparisonCodeTotalBits);
+
+	code = -1;
+	total_code_bits_delta = 0;
+
+	for (i = 0; NybbleRunFromIndex(state, runs_reordered[i])->total_code_bits == 0; ++i){}
+
+	for (; i < TOTAL_SYMBOLS; ++i)
+	{
+		unsigned int nybble_run_index = runs_reordered[i];
+		NybbleRun* const nybble_run = NybbleRunFromIndex(state, nybble_run_index);
+
+		/* TODO: Do this in ComputeCodeLengths. */
+		/* This is too low, so correct it. */
+		++nybble_run->total_code_bits;
+
+		++code;
+
+		/* Prevent conflicting with the reserved inline prefix. */
+		if (nybble_run->total_code_bits >= 6 && (code >> (nybble_run->total_code_bits - 6)) == 0x3E)
 		{
-			state->code >>= 1;
-			--state->total_code_bits;
+			code <<= 1;
+			++previous_code_length;
+			total_code_bits_delta = 1;
 		}
 
-		/* Revert. */
-		state->code >>= 1;
-		--state->total_code_bits;
+		nybble_run->total_code_bits += total_code_bits_delta;
+
+		if (nybble_run->total_code_bits != previous_code_length)
+			code <<= nybble_run->total_code_bits - previous_code_length;
+
+		previous_code_length = nybble_run->total_code_bits;
+
+		nybble_run->code = code;
+
+	#ifdef CLOWNNEMESIS_DEBUG
+		{
+			unsigned int j;
+
+			fprintf(stderr, "Nybble %X of length %d has code ", nybble_run_index / 8, nybble_run_index % 8);
+
+			for (j = 0; j < 8; ++j)
+				fputc((code & (1 << (8 - 1 - j))) != 0 ? '1' : '0', stderr);
+
+			fprintf(stderr, " of %d bits\n", nybble_run->total_code_bits);
+		}
+	#endif
 	}
 }
 
@@ -589,11 +639,14 @@ static void ComputeCodesHuffman(State* const state)
 
 	/* TODO: What if there aren't any? */
 	/* Find the first node with a decent probability. */
-	while (state->node_pool[state->leaf_read_index].occurrances < 3)
+	while (state->node_pool[state->leaf_read_index].occurrances < 1)
 		++state->leaf_read_index;
 
-	state->code = state->total_code_bits = 0;
-	RecurseNode(state, ComputeHuffmanTree(state));
+	ComputeTrees(state);
+	ComputeCodeLengths(state);
+	ComputeCodes(state);
+	/*state->code = state->total_code_bits = 0;
+	RecurseNode(state, ComputeHuffmanTree(state));*/
 }
 
 #endif
