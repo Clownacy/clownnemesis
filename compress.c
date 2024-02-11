@@ -93,7 +93,7 @@ typedef struct State
 	CODE_GENERATOR_STATE
 
 	unsigned int total_runs;
-	unsigned int nybbles_read;
+	unsigned int bytes_read;
 
 	unsigned char previous_nybble;
 
@@ -715,11 +715,11 @@ static int ReadNybble(State* const state)
 		if (value == CLOWNNEMESIS_EOF)
 			return CLOWNNEMESIS_EOF;
 
+		++state->bytes_read;
 		state->input_nybble_buffer = (unsigned char)value;
 	}
 
 	state->nybble_reader_flip_flop = !state->nybble_reader_flip_flop;
-	++state->nybbles_read;
 
 	return (state->input_nybble_buffer >> 4) & 0xF;
 }
@@ -766,7 +766,7 @@ static void ComputeCodes(State* const state)
 
 	/* Count how many times each nybble run occurs in the source data. */
 	/* Also count how many nybbles (bytes) are in the input data. */
-	state->nybbles_read = 0;
+	state->bytes_read = 0;
 	FindRuns(state, LogOccurrance);
 
 	/* Do the coding-specific tasks. */
@@ -782,10 +782,10 @@ static void ComputeCodes(State* const state)
 static void EmitHeader(State* const state)
 {
 	/* TODO: XOR mode. */
-	const unsigned int nybbles_per_tile = 8 * 8;
-	const unsigned int total_tiles = state->nybbles_read / nybbles_per_tile;
+	const unsigned int bytes_per_tile = 0x20;
+	const unsigned int total_tiles = state->bytes_read / bytes_per_tile;
 
-	if (state->nybbles_read % nybbles_per_tile != 0)
+	if (state->bytes_read % bytes_per_tile != 0)
 	{
 	#ifdef CLOWNNEMESIS_DEBUG
 		fputs("Input data size is not a multiple of 0x20 bytes.\n", stderr);
