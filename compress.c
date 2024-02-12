@@ -102,7 +102,7 @@ typedef struct State
 	unsigned char output_byte_buffer;
 	unsigned char output_bits_done;
 
-	cc_bool xor_mode;
+	cc_bool xor_mode_enabled;
 } State;
 
 /* TODO: Just replace this with using direct pointers. */
@@ -152,7 +152,7 @@ static void ComputeSortedRuns(State* const state, NybbleRunsIndex runs_reordered
 	while (not_done);
 }
 
-static void IterateNybbleRuns(State* const state, void (*callback)(State *state, unsigned int run_nybble, unsigned int run_length))
+static void IterateNybbleRuns(State* const state, void (* const callback)(State *state, unsigned int run_nybble, unsigned int run_length_minus_one))
 {
 	unsigned int i;
 
@@ -161,13 +161,13 @@ static void IterateNybbleRuns(State* const state, void (*callback)(State *state,
 		unsigned int j;
 
 		for (j = 0; j < CC_COUNT_OF(state->nybble_runs[i]); ++j)
-			callback(state, i, j + 1);
+			callback(state, i, j);
 	}
 }
 
-static void SumTotalBits(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+static void SumTotalBits(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
 {
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
 	if (nybble_run->total_code_bits != 0)
 	{
@@ -177,9 +177,9 @@ static void SumTotalBits(State* const state, const unsigned int run_nybble, cons
 		/* Find out if this will have the first code table entry with this nybble. */
 		is_the_first = cc_true;
 
-		for (i = 1; i < run_length; ++i)
+		for (i = 0; i < run_length_minus_one; ++i)
 		{
-			if (state->nybble_runs[run_nybble][run_length - 1].total_code_bits != 0)
+			if (state->nybble_runs[run_nybble][run_length_minus_one].total_code_bits != 0)
 			{
 				is_the_first = cc_false;
 				break;
@@ -250,9 +250,9 @@ static unsigned int ComputeCodeLength(NybbleRun* const nybble_run, const unsigne
 	}
 }
 
-static void ComputePreliminaryCodeLengths(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+static void ComputePreliminaryCodeLengths(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
 {
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
 	/* Rare runs aren't added to the code table. */
 	if (nybble_run->occurrances > 2)
@@ -291,9 +291,9 @@ static void ComputeAccumulatedOccurrances(State* const state)
 	}
 }
 
-static void ComputeCode(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+static void ComputeCode(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
 {
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
 	if (nybble_run->total_code_bits != 0)
 	{
@@ -456,10 +456,10 @@ static void ComputeCodesFano(State* const state)
 
 #ifdef HUFFMAN_CODING
 
-static void CreateLeafNode(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+static void CreateLeafNode(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
 {
-	Node* const node = &state->node_pool[run_nybble * MAXIMUM_RUN_LENGTH + run_length - 1];
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+	Node* const node = &state->node_pool[run_nybble * MAXIMUM_RUN_LENGTH + run_length_minus_one];
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
 	node->is_leaf = cc_true;
 	node->occurrances = nybble_run->occurrances;
@@ -542,9 +542,9 @@ static void ComputeTrees(State* const state)
 	}
 }
 
-static void ResetCodeLength(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+static void ResetCodeLength(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
 {
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
 	nybble_run->total_code_bits = 0;
 }
@@ -739,7 +739,7 @@ static int ReadByteThatMightBeXORed(State* const state)
 		state->input_byte_buffer_index = (state->input_byte_buffer_index + 1) % CC_COUNT_OF(state->input_byte_buffer);
 		state->input_byte_buffer[index] = value;
 
-		return value ^ (state->xor_mode ? previous_value : 0);
+		return value ^ (state->xor_mode_enabled ? previous_value : 0);
 	}
 }
 
@@ -773,7 +773,7 @@ static int ReadNybble(State* const state)
 	return (state->input_nybble_buffer >> 4) & 0xF;
 }
 
-static void FindRuns(State* const state, void (*callback)(State *state, unsigned int nybble, unsigned int length))
+static void FindRuns(State* const state, void (* const callback)(State *state, unsigned int run_nybble, unsigned int run_length))
 {
 	int new_nybble, previous_nybble, run_length;
 
@@ -800,22 +800,22 @@ static void FindRuns(State* const state, void (*callback)(State *state, unsigned
 	}
 }
 
-static void LogOccurrance(State* const state, const unsigned int nybble, const unsigned int length)
+static void LogOccurrance(State* const state, const unsigned int run_nybble, const unsigned int run_length)
 {
-	++state->nybble_runs[nybble][length - 1].occurrances;
+	++state->nybble_runs[run_nybble][run_length - 1].occurrances;
 	++state->total_runs;
 }
 
-static void ResetOccurrances(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+static void ResetOccurrances(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
 {
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
 	nybble_run->occurrances = 0;
 }
 
-static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_mode)
+static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_mode_enabled)
 {
-	state->xor_mode = xor_mode;
+	state->xor_mode_enabled = xor_mode_enabled;
 
 	/* Reset occurances to 0. */
 	IterateNybbleRuns(state, ResetOccurrances);
@@ -870,18 +870,18 @@ static void EmitHeader(State* const state)
 		longjmp(state->common.jump_buffer, 1);
 	}
 
-	WriteByte(&state->common, total_tiles >> 8 | state->xor_mode << 7);
+	WriteByte(&state->common, total_tiles >> 8 | state->xor_mode_enabled << 7);
 	WriteByte(&state->common, total_tiles & 0xFF);
 }
 
-static void EmitCodeTableEntry(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+static void EmitCodeTableEntry(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
 {
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
 	if (nybble_run->total_code_bits != 0)
 	{
 	#ifdef CLOWNNEMESIS_DEBUG
-		fprintf(stderr, "Run of nybble %X of length %d occurred %d times (code is ", run_nybble, run_length, nybble_run->occurrances);
+		fprintf(stderr, "Run of nybble %X of length %d occurred %d times (code is ", run_nybble, run_length_minus_one + 1, nybble_run->occurrances);
 
 		{
 			unsigned int i;
@@ -898,7 +898,7 @@ static void EmitCodeTableEntry(State* const state, const unsigned int run_nybble
 			WriteByte(&state->common, 0x80 | run_nybble);
 		}
 
-		WriteByte(&state->common, (run_length - 1) << 4 | nybble_run->total_code_bits);
+		WriteByte(&state->common, run_length_minus_one << 4 | nybble_run->total_code_bits);
 		WriteByte(&state->common, nybble_run->code);
 	}
 }
@@ -940,14 +940,14 @@ static void WriteBits(State* const state, const unsigned int bits, const unsigne
 		WriteBit(state, (bits & (1 << (total_bits - 1 - i))) != 0);
 }
 
-static void EmitCode(State* const state, const unsigned int nybble, const unsigned int length)
+static void EmitCode(State* const state, const unsigned int run_nybble, const unsigned int run_length)
 {
-	const NybbleRun* const nybble_run = &state->nybble_runs[nybble][length - 1];
+	const NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
 
 	if (nybble_run->total_code_bits != 0)
 	{
 	#ifdef CLOWNNEMESIS_DEBUG
-		fprintf(stderr, "Emitting code %X of length %d for nybble %X of length %d.\n", nybble_run->code, nybble_run->total_code_bits, nybble, length);
+		fprintf(stderr, "Emitting code %X of length %d for nybble %X of length %d.\n", nybble_run->code, nybble_run->total_code_bits, run_nybble, run_length);
 	#endif
 
 		WriteBits(state, nybble_run->code, nybble_run->total_code_bits);
@@ -955,7 +955,7 @@ static void EmitCode(State* const state, const unsigned int nybble, const unsign
 	else
 	{
 	#ifdef CLOWNNEMESIS_DEBUG
-		fprintf(stderr, "Emitting reject for nybble %X of length %d.\n", nybble, length);
+		fprintf(stderr, "Emitting reject for nybble %X of length %d.\n", run_nybble, run_length);
 	#endif
 
 		/* This run doesn't have a code, so inline it. */
