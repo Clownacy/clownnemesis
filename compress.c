@@ -10,9 +10,6 @@
 
 #include "common-internal.h"
 
-/* TODO: Empty files. */
-/* TODO: Files with only a single unique nybble run. */
-
 /* Select a particular encoding algorithm. */
 /*#define SHANNON_CODING*/ /* Produces the largest compressed data. */
 /*#define FANO_CODING*/ /* This is what Sega's compressor used. */
@@ -506,7 +503,6 @@ static unsigned int PopSmallestNode(State* const state)
 
 static void ComputeTrees(State* const state)
 {
-	/* TODO: Handle there being no codeable nodes. */
 	unsigned int iterations_done;
 
 	const unsigned int starting_leaf_node_index = state->leaf_read_index;
@@ -577,6 +573,16 @@ static void ComputeCodeLengths(State* const state)
 	/* Recurse through the generated trees and increment the code length of each leaf encountered. */
 	for (i = internal_buffer->read_index; i < internal_buffer->write_index; ++i)
 		RecurseNode(state, &state->node_pool[i]);
+
+	/* I wish I knew why this is necessary, but I don't. Without this, data with few unique nybble runs will be entirely inlined. */
+	for (i = state->leaf_read_index; i < TOTAL_SYMBOLS; ++i)
+	{
+		NybbleRun* const nybble_run = state->node_pool[i].shared.leaf.nybble_run;
+
+		/* Without this check, codes will always be one bit too long. I have absolutely no fucking idea why. */
+		if (nybble_run->total_code_bits == 0)
+			++nybble_run->total_code_bits;
+	}
 }
 
 static void ComputeBestCodeLengths(State* const state)
@@ -587,6 +593,7 @@ static void ComputeBestCodeLengths(State* const state)
 	/* Brute-force the optimal number of coded nybble runs. */
 	/* We do this because, the more coded nybble runs there are, the more likely it is that common nybble runs will be
 	   given longer codes, leading to larger compressed data, so it might be beneficial to use fewer coded nybble runs. */
+	best_starting_leaf_read_index = state->leaf_read_index;
 	best_total_bits = (unsigned int)-1;
 
 	/* Gradually ignore nybble runs, starting with the rarest ones. */
@@ -636,7 +643,9 @@ static void ComputeCodesFromLengths(State* const state)
 	total_code_bits_modifier = 0;
 
 	/* Ignore all of the nybble runs that don't have a code... */
-	for (i = 0; NybbleRunFromIndex(state, runs_reordered[i])->total_code_bits == 0; ++i){}
+	for (i = 0; i < TOTAL_SYMBOLS; ++i)
+		if (NybbleRunFromIndex(state, runs_reordered[i])->total_code_bits != 0)
+			break;
 
 	/* ..and iterate over the ones that do. */
 	for (; i < TOTAL_SYMBOLS; ++i)
@@ -693,8 +702,9 @@ static void ComputeCodesHuffman(State* const state)
 	qsort(state->node_pool, TOTAL_SYMBOLS, sizeof(Node), CompareNodes);
 
 	/* Find the first node with a decent probability. */
-	/* TODO: What if there aren't any? */
-	for (state->leaf_read_index = 0; state->node_pool[state->leaf_read_index].occurrances < 3; ++state->leaf_read_index){}
+	for (state->leaf_read_index = 0; state->leaf_read_index < TOTAL_SYMBOLS; ++state->leaf_read_index)
+		if (state->node_pool[state->leaf_read_index].occurrances >= 3)
+			break;
 
 	/* Compute code lengths. */
 	ComputeBestCodeLengths(state);
