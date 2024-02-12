@@ -10,7 +10,6 @@
 
 #include "common-internal.h"
 
-/* TODO: XOR mode. */
 /* TODO: Empty files. */
 /* TODO: Files with only a single unique nybble run. */
 
@@ -49,7 +48,6 @@ typedef unsigned char NybbleRunsIndex[TOTAL_SYMBOLS];
 		/* Contains the leaf nodes (size: TOTAL_SYMBOLS), and two queues for the internal nodes (size: TOTAL_SYMBOLS * MAXIMUM_BITS). */ \
 		Node node_pool[TOTAL_SYMBOLS + TOTAL_SYMBOLS * MAXIMUM_BITS * 2]; \
 		unsigned int leaf_read_index; \
-		unsigned int total_bits; \
 		InternalBufferIndices internal[2]; \
 		unsigned char internal_buffer_flip_flop; \
 
@@ -94,14 +92,19 @@ typedef struct State
 
 	unsigned int total_runs;
 	unsigned int bytes_read;
+	unsigned int total_bits;
 
 	unsigned char previous_nybble;
 
+	unsigned char input_byte_buffer[4];
+	unsigned char input_byte_buffer_index;
 	unsigned char input_nybble_buffer;
 	unsigned char nybble_reader_flip_flop;
 
 	unsigned char output_byte_buffer;
 	unsigned char output_bits_done;
+
+	cc_bool xor_mode;
 } State;
 
 /* TODO: Just replace this with using direct pointers. */
@@ -162,6 +165,44 @@ static void IterateNybbleRuns(State* const state, void (*callback)(State *state,
 		for (j = 0; j < CC_COUNT_OF(state->nybble_runs[i]); ++j)
 			callback(state, i, j + 1);
 	}
+}
+
+static void SumTotalBits(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+{
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+
+	if (nybble_run->total_code_bits != 0)
+	{
+		cc_bool is_the_first;
+		unsigned int i;
+
+		/* Find out if this will have the first code table entry with this nybble. */
+		is_the_first = cc_true;
+
+		for (i = 1; i < run_length; ++i)
+		{
+			if (state->nybble_runs[run_nybble][run_length - 1].total_code_bits != 0)
+			{
+				is_the_first = cc_false;
+				break;
+			}
+		}
+
+		/* The code table entry uses either 16 bits or 24 bits depending on whether it's the first with its nybble. */
+		state->total_bits += is_the_first ? 24 : 16;
+		state->total_bits += nybble_run->total_code_bits * nybble_run->occurrances;
+	}
+	else
+	{
+		/* An inlined nybble runs costs 13 bits. */
+		state->total_bits += (6 + 3 + 4) * nybble_run->occurrances;
+	}
+}
+
+static void ComputeTotalEncodedBits(State* const state)
+{
+	state->total_bits = 0;
+	IterateNybbleRuns(state, SumTotalBits);
 }
 
 /******************/
@@ -517,6 +558,7 @@ static void RecurseNode(State* const state, const Node* const node)
 	}
 }
 
+/* TODO: Move this up. */
 static void ResetCodeLength(State* const state, const unsigned int run_nybble, const unsigned int run_length)
 {
 	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
@@ -538,38 +580,6 @@ static void ComputeCodeLengths(State* const state)
 		RecurseNode(state, &state->node_pool[i]);
 }
 
-static void SumTotalBits(State* const state, const unsigned int run_nybble, const unsigned int run_length)
-{
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
-
-	if (nybble_run->total_code_bits != 0)
-	{
-		cc_bool is_the_first;
-		unsigned int i;
-
-		/* Find out if this will have the first code table entry with this nybble. */
-		is_the_first = cc_true;
-
-		for (i = 1; i < run_length; ++i)
-		{
-			if (state->nybble_runs[run_nybble][run_length - 1].total_code_bits != 0)
-			{
-				is_the_first = cc_false;
-				break;
-			}
-		}
-
-		/* The code table entry uses either 16 bits or 24 bits depending on whether it's the first with its nybble. */
-		state->total_bits += is_the_first ? 24 : 16;
-		state->total_bits += nybble_run->total_code_bits * nybble_run->occurrances;
-	}
-	else
-	{
-		/* An inlined nybble runs costs 13 bits. */
-		state->total_bits += (6 + 3 + 4) * nybble_run->occurrances;
-	}
-}
-
 static void ComputeBestCodeLengths(State* const state)
 {
 	unsigned int best_starting_leaf_read_index;
@@ -587,8 +597,7 @@ static void ComputeBestCodeLengths(State* const state)
 		ComputeCodeLengths(state);
 
 		/* Find out how many bits this number of coded nybble runs uses. */
-		state->total_bits = 0;
-		IterateNybbleRuns(state, SumTotalBits);
+		ComputeTotalEncodedBits(state);
 
 		/* Track the number of coded nybble runs with the lowest number of bits. */
 		if (state->total_bits < best_total_bits)
@@ -686,8 +695,7 @@ static void ComputeCodesHuffman(State* const state)
 
 	/* Find the first node with a decent probability. */
 	/* TODO: What if there aren't any? */
-	while (state->node_pool[state->leaf_read_index].occurrances < 3)
-		++state->leaf_read_index;
+	for (state->leaf_read_index = 0; state->node_pool[state->leaf_read_index].occurrances < 3; ++state->leaf_read_index){}
 
 	/* Compute code lengths. */
 	ComputeBestCodeLengths(state);
@@ -702,6 +710,28 @@ static void ComputeCodesHuffman(State* const state)
 /* End of Huffman Coding */
 /*************************/
 
+static int ReadByteThatMightBeXORed(State* const state)
+{
+	const int value = ReadByte(&state->common);
+
+	if (value == CLOWNNEMESIS_EOF)
+	{
+		state->input_byte_buffer_index = 0;
+		state->input_byte_buffer[0] = state->input_byte_buffer[1] = state->input_byte_buffer[2] = state->input_byte_buffer[3] = 0;
+		return CLOWNNEMESIS_EOF;
+	}
+	else
+	{
+		const unsigned int index = state->input_byte_buffer_index;
+		const unsigned int previous_value = state->input_byte_buffer[index];
+
+		state->input_byte_buffer_index = (state->input_byte_buffer_index + 1) % CC_COUNT_OF(state->input_byte_buffer);
+		state->input_byte_buffer[index] = value;
+
+		return value ^ (state->xor_mode ? previous_value : 0);
+	}
+}
+
 static int ReadNybble(State* const state)
 {
 	if (state->nybble_reader_flip_flop)
@@ -710,7 +740,7 @@ static int ReadNybble(State* const state)
 	}
 	else
 	{
-		const int value = ReadByte(&state->common);
+		const int value = ReadByteThatMightBeXORed(state);
 
 		if (value == CLOWNNEMESIS_EOF)
 			return CLOWNNEMESIS_EOF;
@@ -727,6 +757,11 @@ static int ReadNybble(State* const state)
 static void FindRuns(State* const state, void (*callback)(State *state, unsigned int nybble, unsigned int length))
 {
 	int new_nybble, previous_nybble, run_length;
+
+	state->bytes_read = 0;
+	state->nybble_reader_flip_flop = cc_false;
+	state->input_byte_buffer[0] = state->input_byte_buffer[1] = state->input_byte_buffer[2] = state->input_byte_buffer[3] = 0;
+	state->input_byte_buffer_index = 0;
 
 	new_nybble = ReadNybble(state);
 	run_length = 0;
@@ -759,14 +794,15 @@ static void ResetOccurrances(State* const state, const unsigned int run_nybble, 
 	nybble_run->occurrances = 0;
 }
 
-static void ComputeCodes(State* const state)
+static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_mode)
 {
+	state->xor_mode = xor_mode;
+
 	/* Reset occurances to 0. */
 	IterateNybbleRuns(state, ResetOccurrances);
 
 	/* Count how many times each nybble run occurs in the source data. */
 	/* Also count how many nybbles (bytes) are in the input data. */
-	state->bytes_read = 0;
 	FindRuns(state, LogOccurrance);
 
 	/* Do the coding-specific tasks. */
@@ -777,11 +813,25 @@ static void ComputeCodes(State* const state)
 #elif defined(HUFFMAN_CODING)
 	ComputeCodesHuffman(state);
 #endif
+
+	ComputeTotalEncodedBits(state);
+
+	return state->total_bits;
+}
+
+static void ComputeCodes(State* const state)
+{
+	/* Process the input data in both regular and XOR mode, seeing which produces the smaller data. */
+	const unsigned int total_bits_regular_mode = ComputeCodesInternal(state, cc_false);
+	const unsigned int total_bits_xor_mode = ComputeCodesInternal(state, cc_true);
+
+	/* If regular mode was smaller, then process the data in that mode again since it's currently in XOR mode still. */
+	if (total_bits_regular_mode < total_bits_xor_mode)
+		ComputeCodesInternal(state, cc_false);
 }
 
 static void EmitHeader(State* const state)
 {
-	/* TODO: XOR mode. */
 	const unsigned int bytes_per_tile = 0x20;
 	const unsigned int total_tiles = state->bytes_read / bytes_per_tile;
 
@@ -801,7 +851,7 @@ static void EmitHeader(State* const state)
 		longjmp(state->common.jump_buffer, 1);
 	}
 
-	WriteByte(&state->common, total_tiles >> 8);
+	WriteByte(&state->common, total_tiles >> 8 | state->xor_mode << 7);
 	WriteByte(&state->common, total_tiles & 0xFF);
 }
 
