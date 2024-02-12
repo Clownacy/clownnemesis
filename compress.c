@@ -545,6 +545,13 @@ static void ComputeTrees(State* const state)
 	}
 }
 
+static void ResetCodeLength(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+{
+	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
+
+	nybble_run->total_code_bits = 0;
+}
+
 static void RecurseNode(State* const state, const Node* const node)
 {
 	if (node->is_leaf)
@@ -556,14 +563,6 @@ static void RecurseNode(State* const state, const Node* const node)
 		RecurseNode(state, &state->node_pool[node->shared.internal.left_child]);
 		RecurseNode(state, &state->node_pool[node->shared.internal.right_child]);
 	}
-}
-
-/* TODO: Move this up. */
-static void ResetCodeLength(State* const state, const unsigned int run_nybble, const unsigned int run_length)
-{
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length - 1];
-
-	nybble_run->total_code_bits = 0;
 }
 
 static void ComputeCodeLengths(State* const state)
