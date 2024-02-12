@@ -1,6 +1,7 @@
 #include "compress.h"
 
 #include <assert.h>
+#include <limits.h>
 
 #ifdef CLOWNNEMESIS_DEBUG
 #include <stdio.h>
@@ -754,6 +755,14 @@ static int ReadNybble(State* const state)
 
 		if (value == CLOWNNEMESIS_EOF)
 			return CLOWNNEMESIS_EOF;
+
+		if (state->bytes_read == UINT_MAX)
+		{
+		#ifdef CLOWNNEMESIS_DEBUG
+			fputs("Input data is too large.\n", stderr);
+		#endif
+			longjmp(state->common.jump_buffer, 1);
+		}
 
 		++state->bytes_read;
 		state->input_nybble_buffer = (unsigned char)value;
