@@ -575,6 +575,7 @@ static void ComputeCodeLengths(State* const state)
 		RecurseNode(state, &state->node_pool[i]);
 
 	/* I wish I knew why this is necessary, but I don't. Without this, data with few unique nybble runs will be entirely inlined. */
+	/* TODO: Figure out what is going on here. */
 	for (i = state->leaf_read_index; i < TOTAL_SYMBOLS; ++i)
 	{
 		NybbleRun* const nybble_run = state->node_pool[i].shared.leaf.nybble_run;
