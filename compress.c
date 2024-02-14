@@ -658,25 +658,30 @@ static void ComputeCodesFromLengths(State* const state)
 		/* What we're doing here is computing the 'canonical Huffman codes' from the code lengths. */
 		++code;
 
-		/* Prevent conflicting with the reserved inline prefix. */
-		if (nybble_run->total_code_bits >= 6 && (code >> (nybble_run->total_code_bits - 6)) == 0x3E)
-		{
-			code <<= 1;
-			++previous_code_length;
-			total_code_bits_modifier = 1;
-
-			assert(previous_code_length != 9);
-		}
-
 		nybble_run->total_code_bits += total_code_bits_modifier;
 
 		if (nybble_run->total_code_bits != previous_code_length)
 		{
 			assert(previous_code_length != 9);
 			code <<= nybble_run->total_code_bits - previous_code_length;
+			previous_code_length = nybble_run->total_code_bits;
 		}
 
-		previous_code_length = nybble_run->total_code_bits;
+		/* Prevent conflicting with the reserved inline prefix. */
+		if (total_code_bits_modifier == 0 /* Don't do this more than once. */
+		 && ((nybble_run->total_code_bits >= 6 && (code >> (nybble_run->total_code_bits - 6)) == 0x3E) /* Soon-to-be suffix of 111111. */
+		  || (nybble_run->total_code_bits < 6 && code == (1u << nybble_run->total_code_bits) - 1))) /* Prefix of 111111. */
+		{
+		#ifdef CLOWNNEMESIS_DEBUG
+			fputs("Performing conflict avoidance.\n", stderr);
+		#endif
+			code <<= 1;
+			++nybble_run->total_code_bits;
+			++previous_code_length;
+			total_code_bits_modifier = 1;
+
+			assert(previous_code_length != 9);
+		}
 
 		nybble_run->code = code;
 
@@ -684,7 +689,7 @@ static void ComputeCodesFromLengths(State* const state)
 		{
 			unsigned int j;
 
-			fprintf(stderr, "Nybble %X of length %d has code ", nybble_run_index / 8, nybble_run_index % 8);
+			fprintf(stderr, "Nybble %X of length %d has code ", nybble_run_index / 8, (nybble_run_index % 8) + 1);
 
 			for (j = 0; j < 8; ++j)
 				fputc((code & (1 << (8 - 1 - j))) != 0 ? '1' : '0', stderr);
@@ -947,7 +952,14 @@ static void EmitCode(State* const state, const unsigned int run_nybble, const un
 	if (nybble_run->total_code_bits != 0)
 	{
 	#ifdef CLOWNNEMESIS_DEBUG
-		fprintf(stderr, "Emitting code %X of length %d for nybble %X of length %d.\n", nybble_run->code, nybble_run->total_code_bits, run_nybble, run_length);
+		unsigned int i;
+
+		fputs("Emitting code ", stderr);
+
+		for (i = 0; i < 8; ++i)
+			fputc((nybble_run->code & (1 << (8 - 1 - i))) != 0 ? '1' : '0', stderr);
+
+		fprintf(stderr, " of length %d for nybble %X of length %d.\n", nybble_run->total_code_bits, run_nybble, run_length);
 	#endif
 
 		WriteBits(state, nybble_run->code, nybble_run->total_code_bits);

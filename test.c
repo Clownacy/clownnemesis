@@ -96,7 +96,6 @@ int main(const int argc, char** const argv)
 
 	static const char* const files[] = {
 		"../tests/s1disasm/artnem/8x8 - GHZ1.nem",
-		"../tests/s1disasm/artnem/8x8 - GHZ1.nem",
 		"../tests/s1disasm/artnem/8x8 - GHZ2.nem",
 		"../tests/s1disasm/artnem/8x8 - LZ.nem",
 		"../tests/s1disasm/artnem/8x8 - MZ.nem",
@@ -269,7 +268,7 @@ int main(const int argc, char** const argv)
 
 		if (file == NULL)
 		{
-			fprintf(stderr, "Could not open file '%s' for reading.\n", file_path);
+			fprintf(stdout, "Could not open file '%s' for reading.\n", file_path);
 		}
 		else
 		{
@@ -279,7 +278,7 @@ int main(const int argc, char** const argv)
 
 			if (!ClownNemesis_Decompress(ReadByteFromFile, file, WriteByteToMemoryStream, &decompressed_memory_stream))
 			{
-				fprintf(stderr, "Could not decompress file '%s'.\n", file_path);
+				fprintf(stdout, "Could not decompress file '%s'.\n", file_path);
 			}
 			else
 			{
@@ -287,25 +286,25 @@ int main(const int argc, char** const argv)
 
 				if (file_position == -1)
 				{
-					fprintf(stderr, "Could not get position of file '%s'. File is probably too large.\n", file_path);					
+					fprintf(stdout, "Could not get position of file '%s'. File is probably too large.\n", file_path);
 				}
 				else
 				{
 					if (!ClownNemesis_Compress(ReadByteFromMemoryStream, &decompressed_memory_stream, WriteByteToMemoryStream, &compressed_memory_stream))
 					{
-						fprintf(stderr, "Could not compress file '%s'.\n", file_path);
+						fprintf(stdout, "Could not compress file '%s'.\n", file_path);
 					}
 					else
 					{
 						if (!ClownNemesis_Decompress(ReadByteFromMemoryStream, &compressed_memory_stream, WriteByteToMemoryStream, &decompressed_memory_stream_2))
 						{
-							fprintf(stderr, "Could not re-decompress file '%s'.\n", file_path);
+							fprintf(stdout, "Could not re-decompress file '%s'.\n", file_path);
 						}
 						else
 						{
 							if (decompressed_memory_stream.write_index != decompressed_memory_stream_2.write_index || memcmp(decompressed_memory_stream.buffer, decompressed_memory_stream_2.buffer, decompressed_memory_stream.write_index) != 0)
 							{
-								fprintf(stderr, "Decompressions of file '%s' do not match.\n", file_path);
+								fprintf(stdout, "Decompressions of file '%s' do not match.\n", file_path);
 							}
 							else
 							{
@@ -326,7 +325,7 @@ int main(const int argc, char** const argv)
 	MemoryStream_Deinitialise(&compressed_memory_stream);
 	MemoryStream_Deinitialise(&decompressed_memory_stream_2);
 
-	fprintf(stderr, "Uncompressed size:   %ld\nOld compressed size: %ld\nNew compressed size: %ld\n", (unsigned long)total_uncompressed_size, (unsigned long)total_original_compressed_size, (unsigned long)total_new_compressed_size);
+	fprintf(stdout, "Uncompressed size:   %ld\nOld compressed size: %ld\nNew compressed size: %ld\nNew vs. old: %f%%\n", (unsigned long)total_uncompressed_size, (unsigned long)total_original_compressed_size, (unsigned long)total_new_compressed_size, (double)total_new_compressed_size / total_original_compressed_size * 100);
 
 	return EXIT_SUCCESS;
 }
