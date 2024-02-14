@@ -371,6 +371,13 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 	{
 		first_nybble_run->code = state->code;
 		first_nybble_run->total_code_bits = state->total_code_bits;
+
+		/* Avoid forming a prefix of the reserved code (0x3F). */
+		if (state->code == (1u << state->total_code_bits) - 1)
+		{
+			first_nybble_run->code <<= 1;
+			++first_nybble_run->total_code_bits;
+		}
 	}
 	/* Give up if we've reached the limit. */
 	else if (state->total_code_bits != 8)
