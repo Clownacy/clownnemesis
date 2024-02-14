@@ -23,3 +23,9 @@ add_executable(clownnemesis-tool
 )
 
 target_link_libraries(clownnemesis-tool PRIVATE clownnemesis)
+
+add_executable(clownnemesis-test
+	"test.c"
+)
+
+target_link_libraries(clownnemesis-test PRIVATE clownnemesis)
