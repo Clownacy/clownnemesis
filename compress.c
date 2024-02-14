@@ -960,8 +960,8 @@ static void EmitCode(State* const state, const unsigned int run_nybble, const un
 
 		/* This run doesn't have a code, so inline it. */
 		WriteBits(state, 0x3F, 6);
-		WriteBits(state, length - 1, 3);
-		WriteBits(state, nybble, 4);
+		WriteBits(state, run_length - 1, 3);
+		WriteBits(state, run_nybble, 4);
 	}
 }
 
