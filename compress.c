@@ -811,11 +811,11 @@ static void LogOccurrance(State* const state, const unsigned int run_nybble, con
 	++state->total_runs;
 }
 
-static void ResetOccurrances(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
+static void ResetNybbleRun(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
 {
 	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
-	nybble_run->occurrances = 0;
+	nybble_run->occurrances = nybble_run->code = nybble_run->total_code_bits = 0;
 }
 
 static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_mode_enabled)
@@ -823,7 +823,7 @@ static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_m
 	state->xor_mode_enabled = xor_mode_enabled;
 
 	/* Reset occurances to 0. */
-	IterateNybbleRuns(state, ResetOccurrances);
+	IterateNybbleRuns(state, ResetNybbleRun);
 
 	/* Count how many times each nybble run occurs in the source data. */
 	/* Also count how many nybbles (bytes) are in the input data. */
