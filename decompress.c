@@ -267,14 +267,15 @@ int ClownNemesis_Decompress(const ClownNemesis_InputCallback read_byte, const vo
 				{
 					unsigned int j;
 
-					const unsigned int code = i >> (8 - nybble_run->total_code_bits);
-
 					fputs("Code ", stderr);
 
-					for (j = 0; j < 8; ++j)
-						fputc((code & 1 << (8 - 1 - j)) != 0 ? '1' : '0', stderr);
+					for (j = 0; j < nybble_run->total_code_bits; ++j)
+						fputc((i & 1 << (8 - 1 - j)) != 0 ? '1' : '0', stderr);
+
+					for (; j < 8; ++j)
+						fputc(' ', stderr);
 					
-					fprintf(stderr, " of %d bits encodes nybble %X of length %d and was seen %d times.\n", nybble_run->total_code_bits, nybble_run->value, nybble_run->length, nybble_run->seen);
+					fprintf(stderr, " encodes nybble %X of length %d and was seen %d times.\n", nybble_run->value, nybble_run->length, nybble_run->seen);
 				}
 			}
 		}
