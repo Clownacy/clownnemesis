@@ -125,7 +125,7 @@ static void ComputeSortedRuns(State* const state, NybbleRunsIndex runs_reordered
 	unsigned int i;
 	cc_bool not_done;
 
-	for (i = 0; i < MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH; ++i)
+	for (i = 0; i < TOTAL_SYMBOLS; ++i)
 		runs_reordered[i] = i;
 
 	/* Sort from most occurring to least occurring. */
@@ -136,7 +136,7 @@ static void ComputeSortedRuns(State* const state, NybbleRunsIndex runs_reordered
 	{
 		not_done = cc_false;
 
-		for (i = 1; i < MAXIMUM_RUN_NYBBLE * MAXIMUM_RUN_LENGTH; ++i)
+		for (i = 1; i < TOTAL_SYMBOLS; ++i)
 		{
 			const NybbleRun* const previous_nybble_run = NybbleRunFromIndex(state, runs_reordered[i - 1]);
 			const NybbleRun* const nybble_run = NybbleRunFromIndex(state, runs_reordered[i]);
