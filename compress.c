@@ -130,6 +130,7 @@ static void ComputeSortedRuns(State* const state, NybbleRunsIndex runs_reordered
 
 	/* Sort from most occurring to least occurring. */
 	/* This needs to be a stable sorting algorithm so that the Fano algorithm matches Sega's compressor. */
+	/* TODO: Did Sega's compressor actually use a stable sort? */
 	/* TODO: Anything better than bubblesort. */
 	do
 	{
@@ -444,6 +445,44 @@ static void ComputeCodesFano(State* const state)
 	state->code = 0;
 	state->total_code_bits = 0;
 	DoSplit(state, 0, TotalValidRuns(state));
+
+	/* As an optimisation, the computed codes are sorted by their nybble runs' occurrances. This assigns the shorter codes to the more-common nybble runs. */
+	/* Sega's compressor did the same thing. */
+	{
+	unsigned int i;
+	cc_bool not_done;
+
+	/* Sort from most occurring to least occurring. */
+	/* This needs to be a stable sorting algorithm so that the Fano algorithm matches Sega's compressor. */
+	/* TODO: Did Sega's compressor actually use a stable sort? */
+	/* TODO: Anything better than bubblesort. */
+	/* TODO: Bloody hell, get rid of this duplicating sorting code! */
+	do
+	{
+		not_done = cc_false;
+
+		for (i = 1; i < TOTAL_SYMBOLS; ++i)
+		{
+			NybbleRun* const previous_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[i - 1]);
+			NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[i]);
+
+			const unsigned int total_code_bits = nybble_run->total_code_bits == 0 ? -1 : nybble_run->total_code_bits;
+			const unsigned int previous_total_code_bits = previous_nybble_run->total_code_bits == 0 ? -1 : previous_nybble_run->total_code_bits;
+
+			if (nybble_run->occurrances != 0 && previous_nybble_run->occurrances != 0 && total_code_bits < previous_total_code_bits)
+			{
+				const unsigned char code = nybble_run->code;
+				const unsigned char total_code_bits = nybble_run->total_code_bits;
+				nybble_run->code = previous_nybble_run->code;
+				nybble_run->total_code_bits = previous_nybble_run->total_code_bits;
+				previous_nybble_run->code = code;
+				previous_nybble_run->total_code_bits = total_code_bits;
+				not_done = cc_true;
+			}
+		}
+	}
+	while (not_done);
+	}
 }
 
 #endif
