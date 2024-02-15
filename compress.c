@@ -302,7 +302,7 @@ static void ComputeCode(State* const state, const unsigned int run_nybble, const
 		const unsigned int code_length = ComputeCodeLength(nybble_run, state->total_runs_with_codes);
 		const unsigned int code = (nybble_run->occurrances_accumulated << code_length) / state->total_runs_with_codes;
 
-		if (code_length >= 6 && (code >> (code_length - 6) & 0x3F) == 0x3F)
+		if ((code_length >= 6 && (code >> (code_length - 6) & 0x3F) == 0x3F) || (code_length < 6 && code == (1u << code_length) - 1))
 		{
 			/* Reject it; it's using a reserved bit string! */
 			nybble_run->total_code_bits = 0;
