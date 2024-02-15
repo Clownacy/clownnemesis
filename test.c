@@ -515,6 +515,10 @@ int main(const int argc, char** const argv)
 								total_original_compressed_size += (size_t)file_position;
 								total_uncompressed_size += decompressed_memory_stream.write_index;
 								total_new_compressed_size += compressed_memory_stream.write_index;
+							#if 0 /* For testing the accuracy of the Fano encoder to Sega's compressor. */
+								if ((size_t)file_position != compressed_memory_stream.write_index)
+									fprintf(stdout, "File '%s' has a differing size.\n", file_path);
+							#endif
 							}
 						}
 					}
