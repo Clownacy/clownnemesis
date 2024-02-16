@@ -456,7 +456,7 @@ static void ComputeCodesFano(State* const state)
 	/* This needs to be a stable sorting algorithm so that the Fano algorithm matches Sega's compressor. */
 	/* TODO: Did Sega's compressor actually use a stable sort? */
 	/* TODO: Anything better than bubblesort. */
-	/* TODO: Bloody hell, get rid of this duplicating sorting code! */
+	/* TODO: Bloody hell, get rid of this duplicated sorting code! */
 	do
 	{
 		not_done = cc_false;
@@ -528,7 +528,6 @@ static unsigned int PopSmallestNode(State* const state)
 
 	if (leaf_nodes_available != 0 && internal_nodes_available != 0)
 	{
-		/* Prefer leaf nodes when equal to avoid long codes. */
 		if (state->node_pool[state->leaf_read_index].occurrances <= state->node_pool[input_internal->read_index].occurrances)
 			return state->leaf_read_index++;
 		else
