@@ -102,7 +102,7 @@ static NybbleRun* NybbleRunFromIndex(State* const state, const unsigned int inde
 
 #if defined(FANO_CODING)
 
-static cc_bool Comparisonoccurrence(const NybbleRun* const nybble_run_1, const NybbleRun* const nybble_run_2)
+static cc_bool ComparisonOccurrence(const NybbleRun* const nybble_run_1, const NybbleRun* const nybble_run_2)
 {
 	return nybble_run_1->occurrences > nybble_run_2->occurrences;
 }
@@ -299,7 +299,7 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 
 static void ComputeCodesFano(State* const state)
 {
-	ComputeSortedRuns(state, state->generator.fano.nybble_runs_sorted, Comparisonoccurrence);
+	ComputeSortedRuns(state, state->generator.fano.nybble_runs_sorted, ComparisonOccurrence);
 
 	state->generator.fano.code = 0;
 	state->generator.fano.total_code_bits = 0;
@@ -716,7 +716,7 @@ static void FindRuns(State* const state, void (* const callback)(State *state, u
 	}
 }
 
-static void Logoccurrence(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+static void LogOccurrence(State* const state, const unsigned int run_nybble, const unsigned int run_length)
 {
 	++state->nybble_runs[run_nybble][run_length - 1].occurrences;
 	++state->total_runs;
@@ -738,7 +738,7 @@ static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_m
 
 	/* Count how many times each nybble run occurs in the source data. */
 	/* Also count how many nybbles (bytes) are in the input data. */
-	FindRuns(state, Logoccurrence);
+	FindRuns(state, LogOccurrence);
 
 	/* Do the coding-specific tasks. */
 #if defined(FANO_CODING)
