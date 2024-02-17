@@ -91,7 +91,7 @@ static int WriteByteToMemoryStream(void* const user_data, const unsigned char by
 int main(const int argc, char** const argv)
 {
 	size_t total_uncompressed_size, total_original_compressed_size, total_new_compressed_size;
-	MemoryStream decompressed_memory_stream, compressed_memory_stream, decompressed_memory_stream_2;
+	MemoryStream compressed_memory_stream, decompressed_memory_stream, compressed_memory_stream_2, decompressed_memory_stream_2;
 	size_t i;
 
 	static const char* const files[] = {
@@ -461,8 +461,9 @@ int main(const int argc, char** const argv)
 
 	total_uncompressed_size = total_original_compressed_size = total_new_compressed_size = 0;
 
-	MemoryStream_Initialise(&decompressed_memory_stream);
 	MemoryStream_Initialise(&compressed_memory_stream);
+	MemoryStream_Initialise(&decompressed_memory_stream);
+	MemoryStream_Initialise(&compressed_memory_stream_2);
 	MemoryStream_Initialise(&decompressed_memory_stream_2);
 
 	for (i = 0; i < CC_COUNT_OF(files); ++i)
@@ -476,61 +477,67 @@ int main(const int argc, char** const argv)
 		}
 		else
 		{
-			MemoryStream_Clear(&decompressed_memory_stream);
 			MemoryStream_Clear(&compressed_memory_stream);
+			MemoryStream_Clear(&decompressed_memory_stream);
+			MemoryStream_Clear(&compressed_memory_stream_2);
 			MemoryStream_Clear(&decompressed_memory_stream_2);
 
-			if (!ClownNemesis_Decompress(ReadByteFromFile, file, WriteByteToMemoryStream, &decompressed_memory_stream))
+			for (;;)
+			{
+				const int byte = ReadByteFromFile(file);
+
+				if (byte == CLOWNNEMESIS_EOF)
+					break;
+				else if (byte == CLOWNNEMESIS_ERROR)
+					fprintf(stdout, "Could not read file '%s'.\n", file_path);
+				else
+					WriteByteToMemoryStream(&compressed_memory_stream, byte);
+			}
+
+			fclose(file);
+
+			if (!ClownNemesis_Decompress(ReadByteFromMemoryStream, &compressed_memory_stream, WriteByteToMemoryStream, &decompressed_memory_stream))
 			{
 				fprintf(stdout, "Could not decompress file '%s'.\n", file_path);
 			}
 			else
 			{
-				const long file_position = ftell(file);
-
-				if (file_position == -1)
+				if (!ClownNemesis_Compress(ReadByteFromMemoryStream, &decompressed_memory_stream, WriteByteToMemoryStream, &compressed_memory_stream_2))
 				{
-					fprintf(stdout, "Could not get position of file '%s'. File is probably too large.\n", file_path);
+					fprintf(stdout, "Could not compress file '%s'.\n", file_path);
 				}
 				else
 				{
-					if (!ClownNemesis_Compress(ReadByteFromMemoryStream, &decompressed_memory_stream, WriteByteToMemoryStream, &compressed_memory_stream))
+					if (!ClownNemesis_Decompress(ReadByteFromMemoryStream, &compressed_memory_stream_2, WriteByteToMemoryStream, &decompressed_memory_stream_2))
 					{
-						fprintf(stdout, "Could not compress file '%s'.\n", file_path);
+						fprintf(stdout, "Could not re-decompress file '%s'.\n", file_path);
 					}
 					else
 					{
-						if (!ClownNemesis_Decompress(ReadByteFromMemoryStream, &compressed_memory_stream, WriteByteToMemoryStream, &decompressed_memory_stream_2))
+						if (decompressed_memory_stream.write_index != decompressed_memory_stream_2.write_index || memcmp(decompressed_memory_stream.buffer, decompressed_memory_stream_2.buffer, decompressed_memory_stream.write_index) != 0)
 						{
-							fprintf(stdout, "Could not re-decompress file '%s'.\n", file_path);
+							fprintf(stdout, "Decompressions of file '%s' do not match.\n", file_path);
 						}
 						else
 						{
-							if (decompressed_memory_stream.write_index != decompressed_memory_stream_2.write_index || memcmp(decompressed_memory_stream.buffer, decompressed_memory_stream_2.buffer, decompressed_memory_stream.write_index) != 0)
-							{
-								fprintf(stdout, "Decompressions of file '%s' do not match.\n", file_path);
-							}
-							else
-							{
-								total_original_compressed_size += (size_t)file_position;
-								total_uncompressed_size += decompressed_memory_stream.write_index;
-								total_new_compressed_size += compressed_memory_stream.write_index;
-							#if 0 /* For testing the accuracy of the Fano encoder to Sega's compressor. */
-								if ((size_t)file_position != compressed_memory_stream.write_index)
-									fprintf(stdout, "File '%s' has a differing size.\n", file_path);
-							#endif
-							}
+							total_original_compressed_size += compressed_memory_stream.write_index;
+							total_uncompressed_size += decompressed_memory_stream.write_index;
+							total_new_compressed_size += compressed_memory_stream_2.write_index;
+
+						#if 0 /* For testing the accuracy of the Fano encoder to Sega's compressor. */
+							if (compressed_memory_stream.write_index != compressed_memory_stream_2.write_index || memcmp(compressed_memory_stream.buffer, compressed_memory_stream_2.buffer, compressed_memory_stream.write_index) != 0)
+								fprintf(stdout, "Compressions of file '%s' do not match.\n", file_path);
+						#endif
 						}
 					}
 				}
 			}
-
-			fclose(file);
 		}
 	}
 
-	MemoryStream_Deinitialise(&decompressed_memory_stream);
 	MemoryStream_Deinitialise(&compressed_memory_stream);
+	MemoryStream_Deinitialise(&decompressed_memory_stream);
+	MemoryStream_Deinitialise(&compressed_memory_stream_2);
 	MemoryStream_Deinitialise(&decompressed_memory_stream_2);
 
 	fprintf(stdout, "Uncompressed size:   %ld\nOld compressed size: %ld\nNew compressed size: %ld\nNew vs. old: %f%%\n", (unsigned long)total_uncompressed_size, (unsigned long)total_original_compressed_size, (unsigned long)total_new_compressed_size, (double)total_new_compressed_size / total_original_compressed_size * 100);
