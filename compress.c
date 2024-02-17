@@ -460,17 +460,19 @@ static void ComputeCodesFano(State* const state)
 		unsigned int j;
 
 		NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[i]);
+		const unsigned int total_code_bits = nybble_run->total_code_bits == 0 ? UINT_MAX : nybble_run->total_code_bits;
 
-		smallest_code_size = nybble_run->total_code_bits;
+		smallest_code_size = total_code_bits;
 		smallest_code_index = i;
 
 		for (j = i + 1; j < TOTAL_SYMBOLS; ++j)
 		{
 			NybbleRun* const later_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[j]);
+			const unsigned int later_total_code_bits = later_nybble_run->total_code_bits == 0 ? UINT_MAX : later_nybble_run->total_code_bits;
 
-			if (later_nybble_run->total_code_bits != 0 && later_nybble_run->total_code_bits < smallest_code_size)
+			if (later_total_code_bits < smallest_code_size)
 			{
-				smallest_code_size = later_nybble_run->total_code_bits;
+				smallest_code_size = later_total_code_bits;
 				smallest_code_index = j;
 			}
 		}
@@ -890,17 +892,22 @@ static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_m
 
 	ComputeTotalEncodedBits(state);
 
-	return state->total_bits;
+	return state->total_bits / 8; /* This division is needed in order for Sonic 1's Basaran tiles to compress accurately. Sega's compressor only counted the bytes, not the bits. */
 }
 
 static void ComputeCodes(State* const state)
 {
 	/* Process the input data in both regular and XOR mode, seeing which produces the smaller data. */
-	const unsigned int total_bits_regular_mode = ComputeCodesInternal(state, cc_false);
-	const unsigned int total_bits_xor_mode = ComputeCodesInternal(state, cc_true);
+	const unsigned int total_bytes_regular_mode = ComputeCodesInternal(state, cc_false);
+	const unsigned int total_bytes_xor_mode = ComputeCodesInternal(state, cc_true);
 
-	/* If regular mode was smaller, then process the data in that mode again since it's currently in XOR mode still. */
-	if (total_bits_regular_mode < total_bits_xor_mode)
+#ifdef CLOWNNEMESIS_DEBUG
+	fprintf(stderr, "Regular: %d bytes.\nXOR:     %d bytes.\n", total_bytes_regular_mode, total_bytes_xor_mode);
+#endif
+
+	/* If regular mode was smaller or equivalent, then process the data in that mode again since it's currently in XOR mode still. */
+	/* Avoid this third pass by caching the first two. */
+	if (total_bytes_regular_mode <= total_bytes_xor_mode)
 		ComputeCodesInternal(state, cc_false);
 }
 
