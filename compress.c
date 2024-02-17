@@ -12,7 +12,6 @@
 #include "common-internal.h"
 
 /* Select a particular encoding algorithm. */
-/*#define SHANNON_CODING*/ /* Produces the largest compressed data. */
 /*#define FANO_CODING*/ /* This is what Sega's compressor used. */
 #define HUFFMAN_CODING /* Produces the smallest compressed data. */
 
@@ -24,23 +23,13 @@
 
 typedef unsigned char NybbleRunsIndex[TOTAL_SYMBOLS];
 
-#if defined(SHANNON_CODING)
-	#define CODE_GENERATOR_NYBBLE_DATA \
-		unsigned int occurrences_accumulated;
-
-	#define CODE_GENERATOR_STATE \
-		unsigned int total_runs_with_codes;
-#elif defined(FANO_CODING)
-	#define CODE_GENERATOR_NYBBLE_DATA
-
+#if defined(FANO_CODING)
 	#define CODE_GENERATOR_STATE \
 		NybbleRunsIndex nybble_runs_sorted; \
 		unsigned char code; \
 		unsigned char total_code_bits;
 #elif defined(HUFFMAN_CODING)
 	#include <stdlib.h>
-
-	#define CODE_GENERATOR_NYBBLE_DATA
 
 	#define CODE_GENERATOR_STATE \
 		/* Contains the leaf nodes (size: TOTAL_SYMBOLS), and two queues for the internal nodes (size: TOTAL_SYMBOLS * MAXIMUM_BITS). */ \
@@ -76,7 +65,6 @@ typedef unsigned char NybbleRunsIndex[TOTAL_SYMBOLS];
 typedef struct NybbleRun
 {
 	unsigned int occurrences;
-	CODE_GENERATOR_NYBBLE_DATA
 	unsigned char code;
 	unsigned char total_code_bits;
 } NybbleRun;
@@ -111,7 +99,7 @@ static NybbleRun* NybbleRunFromIndex(State* const state, const unsigned int inde
 	return &state->nybble_runs[index % CC_COUNT_OF(state->nybble_runs)][index / CC_COUNT_OF(state->nybble_runs)];
 }
 
-#if defined(SHANNON_CODING) || defined(FANO_CODING)
+#if defined(FANO_CODING)
 
 static cc_bool Comparisonoccurrence(const NybbleRun* const nybble_run_1, const NybbleRun* const nybble_run_2)
 {
@@ -203,136 +191,6 @@ static void ComputeTotalEncodedBits(State* const state)
 	state->total_bits = 0;
 	IterateNybbleRuns(state, SumTotalBits);
 }
-
-/******************/
-/* Shannon Coding */
-/******************/
-
-/* https://en.wikipedia.org/wiki/Shannon%E2%80%93Fano_coding */
-
-#ifdef SHANNON_CODING
-
-static unsigned int NextPowerOfTwo(unsigned int v)
-{
-	/* All hail the glorious bit-twiddler! */
-	/* https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2 */
-	/* We only care about 16-bit here. */
-	v--;
-	v |= v >> 1;
-	v |= v >> 2;
-	v |= v >> 4;
-	v |= v >> 8;
-	v++;
-
-	return v;
-}
-
-static unsigned int ComputeCodeLength(NybbleRun* const nybble_run, const unsigned int total_occurrences)
-{
-	/* This is a wacky integer-only way of computing '-log2(occurrences / total_runs)' rounded up the nearest integer. */
-	const unsigned int code_length_pre_log2 = NextPowerOfTwo(CC_DIVIDE_CEILING(total_occurrences, nybble_run->occurrences));
-
-	/* In Nemesis, the maximum code length is 8 bits. */
-	if (code_length_pre_log2 > 1 << 8)
-	{
-		return 0;
-	}
-	else if (code_length_pre_log2 == 1 << 8)
-	{
-		return 8;
-	}
-	else
-	{
-		/* The -1 values are junk. */
-		static const signed char nybble_to_bit_index[9] = {0, 0, 1, -1, 2, -1, -1, -1, 3};
-		const unsigned int bit_offset = code_length_pre_log2 > 0xF ? 4 : 0;
-
-		return bit_offset + nybble_to_bit_index[(code_length_pre_log2 >> bit_offset) & 0xF];
-	}
-}
-
-static void ComputePreliminaryCodeLengths(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
-{
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
-
-	/* Rare runs aren't added to the code table. */
-	if (nybble_run->occurrences > 2)
-	{
-		const unsigned int code_length = ComputeCodeLength(nybble_run, state->total_runs);
-
-		/* 0 means it's too big. */
-		if (code_length != 0)
-		{
-			nybble_run->total_code_bits = code_length;
-			state->total_runs_with_codes += nybble_run->occurrences;
-		}
-	}
-}
-
-static void ComputeAccumulatedoccurrences(State* const state)
-{
-	unsigned int i;
-	NybbleRunsIndex runs_reordered;
-	unsigned int occurrences_accumulator;
-
-	ComputeSortedRuns(state, runs_reordered, Comparisonoccurrence);
-
-	/* Calculate the accumulated occurrences. */
-	occurrences_accumulator = 0;
-
-	for (i = 0; i < CC_COUNT_OF(runs_reordered); ++i)
-	{
-		NybbleRun* const nybble_run = NybbleRunFromIndex(state, runs_reordered[i]);
-
-		if (nybble_run->total_code_bits != 0)
-		{
-			nybble_run->occurrences_accumulated = occurrences_accumulator;
-			occurrences_accumulator += nybble_run->occurrences;
-		}
-	}
-}
-
-static void ComputeCode(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
-{
-	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
-
-	if (nybble_run->total_code_bits != 0)
-	{
-		/* This length won't be too big since we culled the large ones earlier and these can only be smaller, not larger, than before. */
-		const unsigned int code_length = ComputeCodeLength(nybble_run, state->total_runs_with_codes);
-		const unsigned int code = (nybble_run->occurrences_accumulated << code_length) / state->total_runs_with_codes;
-
-		if ((code_length >= 6 && (code >> (code_length - 6) & 0x3F) == 0x3F) || (code_length < 6 && code == (1u << code_length) - 1))
-		{
-			/* Reject it; it's using a reserved bit string! */
-			nybble_run->total_code_bits = 0;
-		}
-		else
-		{
-			nybble_run->code = code;
-			nybble_run->total_code_bits = code_length;
-		}
-	}
-}
-
-static void ComputeCodesShannon(State* const state)
-{
-	/* Compute preliminate code lengths and total the runs that have valid code lengths.
-	   We will use this total to produce even smaller codes later. */
-	state->total_runs_with_codes = 0;
-	IterateNybbleRuns(state, ComputePreliminaryCodeLengths);
-
-	ComputeAccumulatedoccurrences(state);
-
-	/* Compute the codes using the above total and the accumulated occurrences. */
-	IterateNybbleRuns(state, ComputeCode);
-}
-
-#endif
-
-/*************************/
-/* End of Shannon Coding */
-/*************************/
 
 /***************/
 /* Fano Coding */
@@ -882,9 +740,7 @@ static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_m
 	FindRuns(state, Logoccurrence);
 
 	/* Do the coding-specific tasks. */
-#if defined(SHANNON_CODING)
-	ComputeCodesShannon(state);
-#elif defined(FANO_CODING)
+#if defined(FANO_CODING)
 	ComputeCodesFano(state);
 #elif defined(HUFFMAN_CODING)
 	ComputeCodesHuffman(state);
@@ -976,9 +832,6 @@ static void EmitCodeTable(State* const state)
 
 #ifdef CLOWNNEMESIS_DEBUG
 	fprintf(stderr, "Total runs: %d\n", state->total_runs);
-#ifdef SHANNON_CODING
-	fprintf(stderr, "Total runs with codes: %d\n", state->total_runs_with_codes);
-#endif
 #endif
 }
 
