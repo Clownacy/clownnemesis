@@ -26,7 +26,7 @@ typedef unsigned char NybbleRunsIndex[TOTAL_SYMBOLS];
 
 #if defined(SHANNON_CODING)
 	#define CODE_GENERATOR_NYBBLE_DATA \
-		unsigned int occurrances_accumulated;
+		unsigned int occurrences_accumulated;
 
 	#define CODE_GENERATOR_STATE \
 		unsigned int total_runs_with_codes;
@@ -57,7 +57,7 @@ typedef unsigned char NybbleRunsIndex[TOTAL_SYMBOLS];
 	typedef struct Node
 	{
 		cc_bool is_leaf;
-		unsigned int occurrances;
+		unsigned int occurrences;
 
 		union
 		{
@@ -75,7 +75,7 @@ typedef unsigned char NybbleRunsIndex[TOTAL_SYMBOLS];
 
 typedef struct NybbleRun
 {
-	unsigned int occurrances;
+	unsigned int occurrences;
 	CODE_GENERATOR_NYBBLE_DATA
 	unsigned char code;
 	unsigned char total_code_bits;
@@ -113,9 +113,9 @@ static NybbleRun* NybbleRunFromIndex(State* const state, const unsigned int inde
 
 #if defined(SHANNON_CODING) || defined(FANO_CODING)
 
-static cc_bool ComparisonOccurrance(const NybbleRun* const nybble_run_1, const NybbleRun* const nybble_run_2)
+static cc_bool Comparisonoccurrence(const NybbleRun* const nybble_run_1, const NybbleRun* const nybble_run_2)
 {
-	return nybble_run_1->occurrances > nybble_run_2->occurrances;
+	return nybble_run_1->occurrences > nybble_run_2->occurrences;
 }
 
 #endif
@@ -189,12 +189,12 @@ static void SumTotalBits(State* const state, const unsigned int run_nybble, cons
 
 		/* The code table entry uses either 16 bits or 24 bits depending on whether it's the first with its nybble. */
 		state->total_bits += is_the_first ? 24 : 16;
-		state->total_bits += nybble_run->total_code_bits * nybble_run->occurrances;
+		state->total_bits += nybble_run->total_code_bits * nybble_run->occurrences;
 	}
 	else
 	{
 		/* An inlined nybble runs costs 13 bits. */
-		state->total_bits += (6 + 3 + 4) * nybble_run->occurrances;
+		state->total_bits += (6 + 3 + 4) * nybble_run->occurrences;
 	}
 }
 
@@ -227,10 +227,10 @@ static unsigned int NextPowerOfTwo(unsigned int v)
 	return v;
 }
 
-static unsigned int ComputeCodeLength(NybbleRun* const nybble_run, const unsigned int total_occurrances)
+static unsigned int ComputeCodeLength(NybbleRun* const nybble_run, const unsigned int total_occurrences)
 {
-	/* This is a wacky integer-only way of computing '-log2(occurrances / total_runs)' rounded up the nearest integer. */
-	const unsigned int code_length_pre_log2 = NextPowerOfTwo(CC_DIVIDE_CEILING(total_occurrances, nybble_run->occurrances));
+	/* This is a wacky integer-only way of computing '-log2(occurrences / total_runs)' rounded up the nearest integer. */
+	const unsigned int code_length_pre_log2 = NextPowerOfTwo(CC_DIVIDE_CEILING(total_occurrences, nybble_run->occurrences));
 
 	/* In Nemesis, the maximum code length is 8 bits. */
 	if (code_length_pre_log2 > 1 << 8)
@@ -256,7 +256,7 @@ static void ComputePreliminaryCodeLengths(State* const state, const unsigned int
 	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
 	/* Rare runs aren't added to the code table. */
-	if (nybble_run->occurrances > 2)
+	if (nybble_run->occurrences > 2)
 	{
 		const unsigned int code_length = ComputeCodeLength(nybble_run, state->total_runs);
 
@@ -264,21 +264,21 @@ static void ComputePreliminaryCodeLengths(State* const state, const unsigned int
 		if (code_length != 0)
 		{
 			nybble_run->total_code_bits = code_length;
-			state->total_runs_with_codes += nybble_run->occurrances;
+			state->total_runs_with_codes += nybble_run->occurrences;
 		}
 	}
 }
 
-static void ComputeAccumulatedOccurrances(State* const state)
+static void ComputeAccumulatedoccurrences(State* const state)
 {
 	unsigned int i;
 	NybbleRunsIndex runs_reordered;
-	unsigned int occurrances_accumulator;
+	unsigned int occurrences_accumulator;
 
-	ComputeSortedRuns(state, runs_reordered, ComparisonOccurrance);
+	ComputeSortedRuns(state, runs_reordered, Comparisonoccurrence);
 
-	/* Calculate the accumulated occurrances. */
-	occurrances_accumulator = 0;
+	/* Calculate the accumulated occurrences. */
+	occurrences_accumulator = 0;
 
 	for (i = 0; i < CC_COUNT_OF(runs_reordered); ++i)
 	{
@@ -286,8 +286,8 @@ static void ComputeAccumulatedOccurrances(State* const state)
 
 		if (nybble_run->total_code_bits != 0)
 		{
-			nybble_run->occurrances_accumulated = occurrances_accumulator;
-			occurrances_accumulator += nybble_run->occurrances;
+			nybble_run->occurrences_accumulated = occurrences_accumulator;
+			occurrences_accumulator += nybble_run->occurrences;
 		}
 	}
 }
@@ -300,7 +300,7 @@ static void ComputeCode(State* const state, const unsigned int run_nybble, const
 	{
 		/* This length won't be too big since we culled the large ones earlier and these can only be smaller, not larger, than before. */
 		const unsigned int code_length = ComputeCodeLength(nybble_run, state->total_runs_with_codes);
-		const unsigned int code = (nybble_run->occurrances_accumulated << code_length) / state->total_runs_with_codes;
+		const unsigned int code = (nybble_run->occurrences_accumulated << code_length) / state->total_runs_with_codes;
 
 		if ((code_length >= 6 && (code >> (code_length - 6) & 0x3F) == 0x3F) || (code_length < 6 && code == (1u << code_length) - 1))
 		{
@@ -322,9 +322,9 @@ static void ComputeCodesShannon(State* const state)
 	state->total_runs_with_codes = 0;
 	IterateNybbleRuns(state, ComputePreliminaryCodeLengths);
 
-	ComputeAccumulatedOccurrances(state);
+	ComputeAccumulatedoccurrences(state);
 
-	/* Compute the codes using the above total and the accumulated occurrances. */
+	/* Compute the codes using the above total and the accumulated occurrences. */
 	IterateNybbleRuns(state, ComputeCode);
 }
 
@@ -354,21 +354,21 @@ static unsigned int TotalValidRuns(State* const state)
 		NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[i]);
 
 		/* We only want runs that occur 3 or more times. */
-		if (nybble_run->occurrances < 3)
+		if (nybble_run->occurrences < 3)
 			break;
 
-		total_valid_runs += nybble_run->occurrances;
+		total_valid_runs += nybble_run->occurrences;
 	}
 
 	return total_valid_runs;
 }
 
-static void DoSplit(State* const state, const unsigned int starting_sorted_nybble_run_index, const unsigned int total_occurrances)
+static void DoSplit(State* const state, const unsigned int starting_sorted_nybble_run_index, const unsigned int total_occurrences)
 {
 	NybbleRun* const first_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[starting_sorted_nybble_run_index]);
 
 	/* If there is only one run left, then the code belongs to it. */
-	if (first_nybble_run->occurrances == total_occurrances)
+	if (first_nybble_run->occurrences == total_occurrences)
 	{
 		first_nybble_run->code = state->code;
 		first_nybble_run->total_code_bits = state->total_code_bits;
@@ -384,24 +384,24 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 	else if (state->total_code_bits != 8)
 	{
 		/* This performs a Fano binary split, splitting the list of probabilities into two roughly-equal halves and recursing. */
-		unsigned int occurrance_accumulator;
+		unsigned int occurrence_accumulator;
 		unsigned int sorted_nybble_run_index;
 
-		const unsigned int halfway = total_occurrances / 2;
+		const unsigned int halfway = total_occurrences / 2;
 
-		occurrance_accumulator = 0;
+		occurrence_accumulator = 0;
 
 		for (sorted_nybble_run_index = starting_sorted_nybble_run_index; ; ++sorted_nybble_run_index)
 		{
 			const NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[sorted_nybble_run_index]);
-			const unsigned int occurrance_accumulator_next = occurrance_accumulator + nybble_run->occurrances;
+			const unsigned int occurrence_accumulator_next = occurrence_accumulator + nybble_run->occurrences;
 
-			if (occurrance_accumulator_next > halfway)
+			if (occurrence_accumulator_next > halfway)
 			{
-				const unsigned int delta_1 = halfway - occurrance_accumulator;
-				const unsigned int delta_2 = occurrance_accumulator_next - halfway;
+				const unsigned int delta_1 = halfway - occurrence_accumulator;
+				const unsigned int delta_2 = occurrence_accumulator_next - halfway;
 
-				const unsigned int split_occurrance = delta_1 < delta_2 ? occurrance_accumulator : occurrance_accumulator_next;
+				const unsigned int split_occurrence = delta_1 < delta_2 ? occurrence_accumulator : occurrence_accumulator_next;
 				const unsigned int split_index = delta_1 < delta_2 ? sorted_nybble_run_index : sorted_nybble_run_index + 1;
 
 				/* Skip the reserved code (0x3F). */
@@ -414,17 +414,17 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 
 				/* Do bit 0. */
 			#ifdef CLOWNNEMESIS_DEBUG
-				fprintf(stderr, "Splitting 0 %d/%d/%d.\n", starting_sorted_nybble_run_index, split_occurrance, total_occurrances);
+				fprintf(stderr, "Splitting 0 %d/%d/%d.\n", starting_sorted_nybble_run_index, split_occurrence, total_occurrences);
 			#endif
-				DoSplit(state, starting_sorted_nybble_run_index, split_occurrance);
+				DoSplit(state, starting_sorted_nybble_run_index, split_occurrence);
 
 				/* Do bit 1. */
 				state->code |= 1;
 
 			#ifdef CLOWNNEMESIS_DEBUG
-				fprintf(stderr, "Splitting 1 %d/%d/%d.\n", starting_sorted_nybble_run_index, split_occurrance, total_occurrances);
+				fprintf(stderr, "Splitting 1 %d/%d/%d.\n", starting_sorted_nybble_run_index, split_occurrence, total_occurrences);
 			#endif
-				DoSplit(state, split_index, total_occurrances - split_occurrance);
+				DoSplit(state, split_index, total_occurrences - split_occurrence);
 
 				/* Revert. */
 				state->code >>= bits;
@@ -433,20 +433,20 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 				break;
 			}
 
-			occurrance_accumulator = occurrance_accumulator_next;
+			occurrence_accumulator = occurrence_accumulator_next;
 		}
 	}
 }
 
 static void ComputeCodesFano(State* const state)
 {
-	ComputeSortedRuns(state, state->nybble_runs_sorted, ComparisonOccurrance);
+	ComputeSortedRuns(state, state->nybble_runs_sorted, Comparisonoccurrence);
 
 	state->code = 0;
 	state->total_code_bits = 0;
 	DoSplit(state, 0, TotalValidRuns(state));
 
-	/* As an optimisation, the computed codes are sorted by their nybble runs' occurrances. This assigns the shorter codes to the more-common nybble runs. */
+	/* As an optimisation, the computed codes are sorted by their nybble runs' occurrences. This assigns the shorter codes to the more-common nybble runs. */
 	/* Sega's compressor did the same thing. */
 	{
 	unsigned int i;
@@ -469,7 +469,7 @@ static void ComputeCodesFano(State* const state)
 			const unsigned int total_code_bits = nybble_run->total_code_bits == 0 ? -1 : nybble_run->total_code_bits;
 			const unsigned int previous_total_code_bits = previous_nybble_run->total_code_bits == 0 ? -1 : previous_nybble_run->total_code_bits;
 
-			if (nybble_run->occurrances != 0 && previous_nybble_run->occurrances != 0 && total_code_bits < previous_total_code_bits)
+			if (nybble_run->occurrences != 0 && previous_nybble_run->occurrences != 0 && total_code_bits < previous_total_code_bits)
 			{
 				const unsigned char code = nybble_run->code;
 				const unsigned char total_code_bits = nybble_run->total_code_bits;
@@ -508,7 +508,7 @@ static void CreateLeafNode(State* const state, const unsigned int run_nybble, co
 	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
 	node->is_leaf = cc_true;
-	node->occurrances = nybble_run->occurrances;
+	node->occurrences = nybble_run->occurrences;
 	node->shared.leaf.nybble_run = nybble_run;
 }
 
@@ -517,7 +517,7 @@ static int CompareNodes(const void* const a, const void* const b)
 	const Node* const node_a = (const Node*)a;
 	const Node* const node_b = (const Node*)b;
 
-	return node_a->occurrances - node_b->occurrances;
+	return node_a->occurrences - node_b->occurrences;
 }
 
 static unsigned int PopSmallestNode(State* const state)
@@ -528,7 +528,7 @@ static unsigned int PopSmallestNode(State* const state)
 
 	if (leaf_nodes_available != 0 && internal_nodes_available != 0)
 	{
-		if (state->node_pool[state->leaf_read_index].occurrances <= state->node_pool[input_internal->read_index].occurrances)
+		if (state->node_pool[state->leaf_read_index].occurrences <= state->node_pool[input_internal->read_index].occurrences)
 			return state->leaf_read_index++;
 		else
 			return input_internal->read_index++;
@@ -580,7 +580,7 @@ static void ComputeTrees(State* const state)
 		}
 
 		state->node_pool[output_internal->write_index].is_leaf = cc_false;
-		state->node_pool[output_internal->write_index].occurrances = state->node_pool[left_child].occurrances + state->node_pool[right_child].occurrances;
+		state->node_pool[output_internal->write_index].occurrences = state->node_pool[left_child].occurrences + state->node_pool[right_child].occurrences;
 		state->node_pool[output_internal->write_index].shared.internal.left_child = left_child;
 		state->node_pool[output_internal->write_index].shared.internal.right_child = right_child;
 		++output_internal->write_index;
@@ -668,10 +668,10 @@ static void ComputeBestCodeLengths(State* const state)
 
 static cc_bool ComparisonCodeTotalBits(const NybbleRun* const nybble_run_1, const NybbleRun* const nybble_run_2)
 {
-	/* Sort by total code bits first, and sort by occurrance second. */
-	/* We sort by occurrance so that the nybble runs that get bumped to 8 bits are the least common, costing the least space. */
+	/* Sort by total code bits first, and sort by occurrence second. */
+	/* We sort by occurrence so that the nybble runs that get bumped to 8 bits are the least common, costing the least space. */
 	if (nybble_run_1->total_code_bits == nybble_run_2->total_code_bits)
-		return nybble_run_1->occurrances > nybble_run_2->occurrances;
+		return nybble_run_1->occurrences > nybble_run_2->occurrences;
 	else
 		return nybble_run_1->total_code_bits < nybble_run_2->total_code_bits;
 }
@@ -750,12 +750,12 @@ static void ComputeCodesHuffman(State* const state)
 	/* Create leaf nodes. */
 	IterateNybbleRuns(state, CreateLeafNode);
 
-	/* Now sort them by their occurrances. */
+	/* Now sort them by their occurrences. */
 	qsort(state->node_pool, TOTAL_SYMBOLS, sizeof(Node), CompareNodes);
 
 	/* Find the first node with a decent probability. */
 	for (state->leaf_read_index = 0; state->leaf_read_index < TOTAL_SYMBOLS; ++state->leaf_read_index)
-		if (state->node_pool[state->leaf_read_index].occurrances >= 3)
+		if (state->node_pool[state->leaf_read_index].occurrences >= 3)
 			break;
 
 	/* Compute code lengths. */
@@ -850,9 +850,9 @@ static void FindRuns(State* const state, void (* const callback)(State *state, u
 	}
 }
 
-static void LogOccurrance(State* const state, const unsigned int run_nybble, const unsigned int run_length)
+static void Logoccurrence(State* const state, const unsigned int run_nybble, const unsigned int run_length)
 {
-	++state->nybble_runs[run_nybble][run_length - 1].occurrances;
+	++state->nybble_runs[run_nybble][run_length - 1].occurrences;
 	++state->total_runs;
 }
 
@@ -860,7 +860,7 @@ static void ResetNybbleRun(State* const state, const unsigned int run_nybble, co
 {
 	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
-	nybble_run->occurrances = nybble_run->code = nybble_run->total_code_bits = 0;
+	nybble_run->occurrences = nybble_run->code = nybble_run->total_code_bits = 0;
 }
 
 static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_mode_enabled)
@@ -872,7 +872,7 @@ static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_m
 
 	/* Count how many times each nybble run occurs in the source data. */
 	/* Also count how many nybbles (bytes) are in the input data. */
-	FindRuns(state, LogOccurrance);
+	FindRuns(state, Logoccurrence);
 
 	/* Do the coding-specific tasks. */
 #if defined(SHANNON_CODING)
@@ -931,7 +931,7 @@ static void EmitCodeTableEntry(State* const state, const unsigned int run_nybble
 	if (nybble_run->total_code_bits != 0)
 	{
 	#ifdef CLOWNNEMESIS_DEBUG
-		fprintf(stderr, "Run of nybble %X of length %d occurred %d times (code is ", run_nybble, run_length_minus_one + 1, nybble_run->occurrances);
+		fprintf(stderr, "Run of nybble %X of length %d occurred %d times (code is ", run_nybble, run_length_minus_one + 1, nybble_run->occurrences);
 
 		{
 			unsigned int i;
