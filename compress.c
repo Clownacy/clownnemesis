@@ -108,7 +108,7 @@ typedef struct State
 /* TODO: Just replace this with using direct pointers. */
 static NybbleRun* NybbleRunFromIndex(State* const state, const unsigned int index)
 {
-	return &state->nybble_runs[index / CC_COUNT_OF(state->nybble_runs[0])][index % CC_COUNT_OF(state->nybble_runs[0])];
+	return &state->nybble_runs[index % CC_COUNT_OF(state->nybble_runs)][index / CC_COUNT_OF(state->nybble_runs)];
 }
 
 #if defined(SHANNON_CODING) || defined(FANO_CODING)
@@ -450,38 +450,43 @@ static void ComputeCodesFano(State* const state)
 	/* Sega's compressor did the same thing. */
 	{
 	unsigned int i;
-	cc_bool not_done;
 
 	/* Sort from most occurring to least occurring. */
-	/* This needs to be a stable sorting algorithm so that the Fano algorithm matches Sega's compressor. */
-	/* TODO: Did Sega's compressor actually use a stable sort? */
-	/* TODO: Anything better than bubblesort. */
-	/* TODO: Bloody hell, get rid of this duplicated sorting code! */
-	do
+	/* In order to match Sega's compressor, we use a Selection Sort here. */
+	for (i = 0; i < TOTAL_SYMBOLS - 1; ++i)
 	{
-		not_done = cc_false;
+		unsigned int smallest_code_size;
+		unsigned int smallest_code_index;
+		unsigned int j;
 
-		for (i = 1; i < TOTAL_SYMBOLS; ++i)
+		NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[i]);
+
+		smallest_code_size = nybble_run->total_code_bits;
+		smallest_code_index = i;
+
+		for (j = i + 1; j < TOTAL_SYMBOLS; ++j)
 		{
-			NybbleRun* const previous_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[i - 1]);
-			NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[i]);
+			NybbleRun* const later_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[j]);
 
-			const unsigned int total_code_bits = nybble_run->total_code_bits == 0 ? -1 : nybble_run->total_code_bits;
-			const unsigned int previous_total_code_bits = previous_nybble_run->total_code_bits == 0 ? -1 : previous_nybble_run->total_code_bits;
-
-			if (nybble_run->occurrences != 0 && previous_nybble_run->occurrences != 0 && total_code_bits < previous_total_code_bits)
+			if (later_nybble_run->total_code_bits != 0 && later_nybble_run->total_code_bits < smallest_code_size)
 			{
-				const unsigned char code = nybble_run->code;
-				const unsigned char total_code_bits = nybble_run->total_code_bits;
-				nybble_run->code = previous_nybble_run->code;
-				nybble_run->total_code_bits = previous_nybble_run->total_code_bits;
-				previous_nybble_run->code = code;
-				previous_nybble_run->total_code_bits = total_code_bits;
-				not_done = cc_true;
+				smallest_code_size = later_nybble_run->total_code_bits;
+				smallest_code_index = j;
 			}
 		}
+
+		if (smallest_code_index != i)
+		{
+			NybbleRun* const later_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[smallest_code_index]);
+
+			const unsigned char code = later_nybble_run->code;
+			const unsigned char total_code_bits = later_nybble_run->total_code_bits;
+			later_nybble_run->code = nybble_run->code;
+			later_nybble_run->total_code_bits = nybble_run->total_code_bits;
+			nybble_run->code = code;
+			nybble_run->total_code_bits = total_code_bits;
+		}
 	}
-	while (not_done);
 	}
 }
 
