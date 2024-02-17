@@ -333,7 +333,7 @@ int main(const int argc, char** const argv)
 		"../tests/s2disasm/art/nemesis/Horizontal spring.nem",
 		"../tests/s2disasm/art/nemesis/Invincibility stars.nem",
 		"../tests/s2disasm/art/nemesis/Large explosion.nem",
-		"../tests/s2disasm/art/nemesis/Large moving platform from CNZ.nem",
+		"../tests/s2disasm/art/nemesis/Large moving platform from CPZ.nem",
 		"../tests/s2disasm/art/nemesis/Large spinning wheel from MTZ - indent.nem",
 		"../tests/s2disasm/art/nemesis/Large spinning wheel from MTZ.nem",
 		"../tests/s2disasm/art/nemesis/Large wooden box from MCZ.nem",
@@ -482,6 +482,7 @@ int main(const int argc, char** const argv)
 			MemoryStream_Clear(&compressed_memory_stream_2);
 			MemoryStream_Clear(&decompressed_memory_stream_2);
 
+			/* TODO: Make this less gross. */
 			for (;;)
 			{
 				const int byte = ReadByteFromFile(file);
