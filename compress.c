@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <stdlib.h>
 
 #ifdef CLOWNNEMESIS_DEBUG
 #include <stdio.h>
@@ -12,8 +13,8 @@
 #include "common-internal.h"
 
 /* Select a particular encoding algorithm. */
-/*#define FANO_CODING*/ /* This is what Sega's compressor used. */
-#define HUFFMAN_CODING /* Produces the smallest compressed data. */
+#define FANO_CODING /* This is what Sega's compressor used. */
+/*#define HUFFMAN_CODING*/ /* Produces the smallest compressed data. */
 
 #define MAXIMUM_RUN_NYBBLE 0x10
 #define MAXIMUM_RUN_LENGTH 8
@@ -23,44 +24,28 @@
 
 typedef unsigned char NybbleRunsIndex[TOTAL_SYMBOLS];
 
-#if defined(FANO_CODING)
-	#define CODE_GENERATOR_STATE \
-		NybbleRunsIndex nybble_runs_sorted; \
-		unsigned char code; \
-		unsigned char total_code_bits;
-#elif defined(HUFFMAN_CODING)
-	#include <stdlib.h>
+typedef struct InternalBufferIndices
+{
+	unsigned int read_index, write_index;
+} InternalBufferIndices;
 
-	#define CODE_GENERATOR_STATE \
-		/* Contains the leaf nodes (size: TOTAL_SYMBOLS), and two queues for the internal nodes (size: TOTAL_SYMBOLS * MAXIMUM_BITS). */ \
-		Node node_pool[TOTAL_SYMBOLS + TOTAL_SYMBOLS * MAXIMUM_BITS * 2]; \
-		unsigned int leaf_read_index; \
-		InternalBufferIndices internal[2]; \
-		unsigned char internal_buffer_flip_flop; \
+typedef struct Node
+{
+	cc_bool is_leaf;
+	unsigned int occurrences;
 
-	typedef struct InternalBufferIndices
+	union
 	{
-		unsigned int read_index, write_index;
-	} InternalBufferIndices;
-
-	typedef struct Node
-	{
-		cc_bool is_leaf;
-		unsigned int occurrences;
-
-		union
+		struct
 		{
-			struct
-			{
-				unsigned short left_child, right_child;
-			} internal;
-			struct
-			{
-				struct NybbleRun *nybble_run;
-			} leaf;
-		} shared;
-	} Node;
-#endif
+			unsigned short left_child, right_child;
+		} internal;
+		struct
+		{
+			struct NybbleRun *nybble_run;
+		} leaf;
+	} shared;
+} Node;
 
 typedef struct NybbleRun
 {
@@ -74,7 +59,23 @@ typedef struct State
 	StateCommon common;
 
 	NybbleRun nybble_runs[MAXIMUM_RUN_NYBBLE][MAXIMUM_RUN_LENGTH];
-	CODE_GENERATOR_STATE
+	union
+	{
+		struct
+		{
+			NybbleRunsIndex nybble_runs_sorted;
+			unsigned char code;
+			unsigned char total_code_bits;
+		} fano;
+		struct
+		{
+			/* Contains the leaf nodes (size: TOTAL_SYMBOLS), and two queues for the internal nodes (size: TOTAL_SYMBOLS * MAXIMUM_BITS). */
+			Node node_pool[TOTAL_SYMBOLS + TOTAL_SYMBOLS * MAXIMUM_BITS * 2];
+			unsigned int leaf_read_index;
+			InternalBufferIndices internal[2];
+			unsigned char internal_buffer_flip_flop;
+		} huffman;
+	} generator;
 
 	unsigned int total_runs;
 	unsigned int bytes_read;
@@ -207,9 +208,9 @@ static unsigned int TotalValidRuns(State* const state)
 
 	total_valid_runs = 0;
 
-	for (i = 0; i < CC_COUNT_OF(state->nybble_runs_sorted); ++i)
+	for (i = 0; i < CC_COUNT_OF(state->generator.fano.nybble_runs_sorted); ++i)
 	{
-		NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[i]);
+		NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->generator.fano.nybble_runs_sorted[i]);
 
 		/* We only want runs that occur 3 or more times. */
 		if (nybble_run->occurrences < 3)
@@ -223,23 +224,23 @@ static unsigned int TotalValidRuns(State* const state)
 
 static void DoSplit(State* const state, const unsigned int starting_sorted_nybble_run_index, const unsigned int total_occurrences)
 {
-	NybbleRun* const first_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[starting_sorted_nybble_run_index]);
+	NybbleRun* const first_nybble_run = NybbleRunFromIndex(state, state->generator.fano.nybble_runs_sorted[starting_sorted_nybble_run_index]);
 
 	/* If there is only one run left, then the code belongs to it. */
 	if (first_nybble_run->occurrences == total_occurrences)
 	{
-		first_nybble_run->code = state->code;
-		first_nybble_run->total_code_bits = state->total_code_bits;
+		first_nybble_run->code = state->generator.fano.code;
+		first_nybble_run->total_code_bits = state->generator.fano.total_code_bits;
 
 		/* Avoid forming a prefix of the reserved code (0x3F). */
-		if (state->code == (1u << state->total_code_bits) - 1)
+		if (state->generator.fano.code == (1u << state->generator.fano.total_code_bits) - 1)
 		{
 			first_nybble_run->code <<= 1;
 			++first_nybble_run->total_code_bits;
 		}
 	}
 	/* Give up if we've reached the limit. */
-	else if (state->total_code_bits != 8)
+	else if (state->generator.fano.total_code_bits != 8)
 	{
 		/* This performs a Fano binary split, splitting the list of probabilities into two roughly-equal halves and recursing. */
 		unsigned int occurrence_accumulator;
@@ -251,7 +252,7 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 
 		for (sorted_nybble_run_index = starting_sorted_nybble_run_index; ; ++sorted_nybble_run_index)
 		{
-			const NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[sorted_nybble_run_index]);
+			const NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->generator.fano.nybble_runs_sorted[sorted_nybble_run_index]);
 			const unsigned int occurrence_accumulator_next = occurrence_accumulator + nybble_run->occurrences;
 
 			if (occurrence_accumulator_next > halfway)
@@ -263,12 +264,12 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 				const unsigned int split_index = delta_1 < delta_2 ? sorted_nybble_run_index : sorted_nybble_run_index + 1;
 
 				/* Skip the reserved code (0x3F). */
-				const cc_bool skip_reserved = state->total_code_bits == 5 && state->code == 0x1F;
+				const cc_bool skip_reserved = state->generator.fano.total_code_bits == 5 && state->generator.fano.code == 0x1F;
 				const unsigned int bits = skip_reserved ? 2 : 1;
 
 				/* Extend the code. */
-				state->code <<= bits;
-				state->total_code_bits += bits;
+				state->generator.fano.code <<= bits;
+				state->generator.fano.total_code_bits += bits;
 
 				/* Do bit 0. */
 			#ifdef CLOWNNEMESIS_DEBUG
@@ -277,7 +278,7 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 				DoSplit(state, starting_sorted_nybble_run_index, split_occurrence);
 
 				/* Do bit 1. */
-				state->code |= 1;
+				state->generator.fano.code |= 1;
 
 			#ifdef CLOWNNEMESIS_DEBUG
 				fprintf(stderr, "Splitting 1 %d/%d/%d.\n", starting_sorted_nybble_run_index, split_occurrence, total_occurrences);
@@ -285,8 +286,8 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 				DoSplit(state, split_index, total_occurrences - split_occurrence);
 
 				/* Revert. */
-				state->code >>= bits;
-				state->total_code_bits -= bits;
+				state->generator.fano.code >>= bits;
+				state->generator.fano.total_code_bits -= bits;
 
 				break;
 			}
@@ -298,10 +299,10 @@ static void DoSplit(State* const state, const unsigned int starting_sorted_nybbl
 
 static void ComputeCodesFano(State* const state)
 {
-	ComputeSortedRuns(state, state->nybble_runs_sorted, Comparisonoccurrence);
+	ComputeSortedRuns(state, state->generator.fano.nybble_runs_sorted, Comparisonoccurrence);
 
-	state->code = 0;
-	state->total_code_bits = 0;
+	state->generator.fano.code = 0;
+	state->generator.fano.total_code_bits = 0;
 	DoSplit(state, 0, TotalValidRuns(state));
 
 	/* As an optimisation, the computed codes are sorted by their nybble runs' occurrences. This assigns the shorter codes to the more-common nybble runs. */
@@ -317,7 +318,7 @@ static void ComputeCodesFano(State* const state)
 		unsigned int smallest_code_index;
 		unsigned int j;
 
-		NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[i]);
+		NybbleRun* const nybble_run = NybbleRunFromIndex(state, state->generator.fano.nybble_runs_sorted[i]);
 		const unsigned int total_code_bits = nybble_run->total_code_bits == 0 ? UINT_MAX : nybble_run->total_code_bits;
 
 		smallest_code_size = total_code_bits;
@@ -325,7 +326,7 @@ static void ComputeCodesFano(State* const state)
 
 		for (j = i + 1; j < TOTAL_SYMBOLS; ++j)
 		{
-			NybbleRun* const later_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[j]);
+			NybbleRun* const later_nybble_run = NybbleRunFromIndex(state, state->generator.fano.nybble_runs_sorted[j]);
 			const unsigned int later_total_code_bits = later_nybble_run->total_code_bits == 0 ? UINT_MAX : later_nybble_run->total_code_bits;
 
 			if (later_total_code_bits < smallest_code_size)
@@ -337,7 +338,7 @@ static void ComputeCodesFano(State* const state)
 
 		if (smallest_code_index != i)
 		{
-			NybbleRun* const later_nybble_run = NybbleRunFromIndex(state, state->nybble_runs_sorted[smallest_code_index]);
+			NybbleRun* const later_nybble_run = NybbleRunFromIndex(state, state->generator.fano.nybble_runs_sorted[smallest_code_index]);
 
 			const unsigned char code = later_nybble_run->code;
 			const unsigned char total_code_bits = later_nybble_run->total_code_bits;
@@ -369,7 +370,7 @@ static void ComputeCodesFano(State* const state)
 
 static void CreateLeafNode(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
 {
-	Node* const node = &state->node_pool[run_nybble * MAXIMUM_RUN_LENGTH + run_length_minus_one];
+	Node* const node = &state->generator.huffman.node_pool[run_nybble * MAXIMUM_RUN_LENGTH + run_length_minus_one];
 	NybbleRun* const nybble_run = &state->nybble_runs[run_nybble][run_length_minus_one];
 
 	node->is_leaf = cc_true;
@@ -387,20 +388,20 @@ static int CompareNodes(const void* const a, const void* const b)
 
 static unsigned int PopSmallestNode(State* const state)
 {
-	InternalBufferIndices* const input_internal = &state->internal[state->internal_buffer_flip_flop];
-	const unsigned int leaf_nodes_available = TOTAL_SYMBOLS - state->leaf_read_index;
+	InternalBufferIndices* const input_internal = &state->generator.huffman.internal[state->generator.huffman.internal_buffer_flip_flop];
+	const unsigned int leaf_nodes_available = TOTAL_SYMBOLS - state->generator.huffman.leaf_read_index;
 	const unsigned int internal_nodes_available = input_internal->write_index - input_internal->read_index;
 
 	if (leaf_nodes_available != 0 && internal_nodes_available != 0)
 	{
-		if (state->node_pool[state->leaf_read_index].occurrences <= state->node_pool[input_internal->read_index].occurrences)
-			return state->leaf_read_index++;
+		if (state->generator.huffman.node_pool[state->generator.huffman.leaf_read_index].occurrences <= state->generator.huffman.node_pool[input_internal->read_index].occurrences)
+			return state->generator.huffman.leaf_read_index++;
 		else
 			return input_internal->read_index++;
 	}
 	else if (leaf_nodes_available != 0)
 	{
-		return state->leaf_read_index++;
+		return state->generator.huffman.leaf_read_index++;
 	}
 	else if (internal_nodes_available != 0)
 	{
@@ -416,27 +417,27 @@ static void ComputeTrees(State* const state)
 {
 	unsigned int iterations_done;
 
-	const unsigned int starting_leaf_node_index = state->leaf_read_index;
+	const unsigned int starting_leaf_node_index = state->generator.huffman.leaf_read_index;
 
 	/* Welcome to Hell. */
 	/* This is the heart of the package-merge algorithm. */
-	state->internal[0].read_index = state->internal[0].write_index = TOTAL_SYMBOLS;
-	state->internal[1].read_index = state->internal[1].write_index = TOTAL_SYMBOLS + TOTAL_SYMBOLS * MAXIMUM_BITS;
+	state->generator.huffman.internal[0].read_index = state->generator.huffman.internal[0].write_index = TOTAL_SYMBOLS;
+	state->generator.huffman.internal[1].read_index = state->generator.huffman.internal[1].write_index = TOTAL_SYMBOLS + TOTAL_SYMBOLS * MAXIMUM_BITS;
 
 	iterations_done = 0;
 
 	for (;;)
 	{
-		InternalBufferIndices* const output_internal = &state->internal[state->internal_buffer_flip_flop ^ 1];
+		InternalBufferIndices* const output_internal = &state->generator.huffman.internal[state->generator.huffman.internal_buffer_flip_flop ^ 1];
 
 		const unsigned int right_child = PopSmallestNode(state);
 		const unsigned int left_child = PopSmallestNode(state);
 
 		if (left_child == (unsigned int)-1 || right_child == (unsigned int)-1)
 		{
-			state->leaf_read_index = starting_leaf_node_index;
+			state->generator.huffman.leaf_read_index = starting_leaf_node_index;
 
-			state->internal_buffer_flip_flop ^= 1;
+			state->generator.huffman.internal_buffer_flip_flop ^= 1;
 
 			if (++iterations_done == 7)
 				break;
@@ -444,10 +445,10 @@ static void ComputeTrees(State* const state)
 			continue;
 		}
 
-		state->node_pool[output_internal->write_index].is_leaf = cc_false;
-		state->node_pool[output_internal->write_index].occurrences = state->node_pool[left_child].occurrences + state->node_pool[right_child].occurrences;
-		state->node_pool[output_internal->write_index].shared.internal.left_child = left_child;
-		state->node_pool[output_internal->write_index].shared.internal.right_child = right_child;
+		state->generator.huffman.node_pool[output_internal->write_index].is_leaf = cc_false;
+		state->generator.huffman.node_pool[output_internal->write_index].occurrences = state->generator.huffman.node_pool[left_child].occurrences + state->generator.huffman.node_pool[right_child].occurrences;
+		state->generator.huffman.node_pool[output_internal->write_index].shared.internal.left_child = left_child;
+		state->generator.huffman.node_pool[output_internal->write_index].shared.internal.right_child = right_child;
 		++output_internal->write_index;
 	}
 }
@@ -467,8 +468,8 @@ static void RecurseNode(State* const state, const Node* const node)
 	}
 	else
 	{
-		RecurseNode(state, &state->node_pool[node->shared.internal.left_child]);
-		RecurseNode(state, &state->node_pool[node->shared.internal.right_child]);
+		RecurseNode(state, &state->generator.huffman.node_pool[node->shared.internal.left_child]);
+		RecurseNode(state, &state->generator.huffman.node_pool[node->shared.internal.right_child]);
 	}
 }
 
@@ -476,20 +477,20 @@ static void ComputeCodeLengths(State* const state)
 {
 	unsigned int i;
 
-	InternalBufferIndices* const internal_buffer = &state->internal[state->internal_buffer_flip_flop];
+	InternalBufferIndices* const internal_buffer = &state->generator.huffman.internal[state->generator.huffman.internal_buffer_flip_flop];
 
 	/* Reset the code lengths to 0, just in case. */
 	IterateNybbleRuns(state, ResetCodeLength);
 
 	/* Recurse through the generated trees and increment the code length of each leaf encountered. */
 	for (i = internal_buffer->read_index; i < internal_buffer->write_index; ++i)
-		RecurseNode(state, &state->node_pool[i]);
+		RecurseNode(state, &state->generator.huffman.node_pool[i]);
 
 	/* I wish I knew why this is necessary, but I don't. Without this, data with few unique nybble runs will be entirely inlined. */
 	/* TODO: Figure out what is going on here. */
-	for (i = state->leaf_read_index; i < TOTAL_SYMBOLS; ++i)
+	for (i = state->generator.huffman.leaf_read_index; i < TOTAL_SYMBOLS; ++i)
 	{
-		NybbleRun* const nybble_run = state->node_pool[i].shared.leaf.nybble_run;
+		NybbleRun* const nybble_run = state->generator.huffman.node_pool[i].shared.leaf.nybble_run;
 
 		/* Without this check, codes will always be one bit too long. I have absolutely no fucking idea why. */
 		if (nybble_run->total_code_bits == 0)
@@ -505,11 +506,11 @@ static void ComputeBestCodeLengths(State* const state)
 	/* Brute-force the optimal number of coded nybble runs. */
 	/* We do this because, the more coded nybble runs there are, the more likely it is that common nybble runs will be
 	   given longer codes, leading to larger compressed data, so it might be beneficial to use fewer coded nybble runs. */
-	best_starting_leaf_read_index = state->leaf_read_index;
+	best_starting_leaf_read_index = state->generator.huffman.leaf_read_index;
 	best_total_bits = (unsigned int)-1;
 
 	/* Gradually ignore nybble runs, starting with the rarest ones. */
-	for (; state->leaf_read_index < TOTAL_SYMBOLS - 1; ++state->leaf_read_index)
+	for (; state->generator.huffman.leaf_read_index < TOTAL_SYMBOLS - 1; ++state->generator.huffman.leaf_read_index)
 	{
 		ComputeTrees(state);
 		ComputeCodeLengths(state);
@@ -521,12 +522,12 @@ static void ComputeBestCodeLengths(State* const state)
 		if (state->total_bits < best_total_bits)
 		{
 			best_total_bits = state->total_bits;
-			best_starting_leaf_read_index = state->leaf_read_index;
+			best_starting_leaf_read_index = state->generator.huffman.leaf_read_index;
 		}
 	}
 
 	/* Now that we know the ideal number of coded nybble runs, use it to continue compression. */
-	state->leaf_read_index = best_starting_leaf_read_index;
+	state->generator.huffman.leaf_read_index = best_starting_leaf_read_index;
 	ComputeTrees(state);
 	ComputeCodeLengths(state);
 }
@@ -616,11 +617,11 @@ static void ComputeCodesHuffman(State* const state)
 	IterateNybbleRuns(state, CreateLeafNode);
 
 	/* Now sort them by their occurrences. */
-	qsort(state->node_pool, TOTAL_SYMBOLS, sizeof(Node), CompareNodes);
+	qsort(state->generator.huffman.node_pool, TOTAL_SYMBOLS, sizeof(Node), CompareNodes);
 
 	/* Find the first node with a decent probability. */
-	for (state->leaf_read_index = 0; state->leaf_read_index < TOTAL_SYMBOLS; ++state->leaf_read_index)
-		if (state->node_pool[state->leaf_read_index].occurrences >= 3)
+	for (state->generator.huffman.leaf_read_index = 0; state->generator.huffman.leaf_read_index < TOTAL_SYMBOLS; ++state->generator.huffman.leaf_read_index)
+		if (state->generator.huffman.node_pool[state->generator.huffman.leaf_read_index].occurrences >= 3)
 			break;
 
 	/* Compute code lengths. */
