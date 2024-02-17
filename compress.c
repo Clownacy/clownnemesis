@@ -180,7 +180,7 @@ static void SumTotalBits(State* const state, const unsigned int run_nybble, cons
 
 		for (i = 0; i < run_length_minus_one; ++i)
 		{
-			if (state->nybble_runs[run_nybble][run_length_minus_one].total_code_bits != 0)
+			if (state->nybble_runs[run_nybble][i].total_code_bits != 0)
 			{
 				is_the_first = cc_false;
 				break;
