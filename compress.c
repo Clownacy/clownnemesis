@@ -12,10 +12,6 @@
 
 #include "common-internal.h"
 
-/* Select a particular encoding algorithm. */
-#define FANO_CODING /* This is what Sega's compressor used. */
-/*#define HUFFMAN_CODING*/ /* Produces the smallest compressed data. */
-
 #define MAXIMUM_RUN_NYBBLE 0x10
 #define MAXIMUM_RUN_LENGTH 8
 
@@ -100,14 +96,10 @@ static NybbleRun* NybbleRunFromIndex(State* const state, const unsigned int inde
 	return &state->nybble_runs[index % CC_COUNT_OF(state->nybble_runs)][index / CC_COUNT_OF(state->nybble_runs)];
 }
 
-#if defined(FANO_CODING)
-
 static cc_bool ComparisonOccurrence(const NybbleRun* const nybble_run_1, const NybbleRun* const nybble_run_2)
 {
 	return nybble_run_1->occurrences > nybble_run_2->occurrences;
 }
-
-#endif
 
 static void ComputeSortedRuns(State* const state, NybbleRunsIndex runs_reordered, cc_bool (*comparison)(const NybbleRun *nybble_run_1, const NybbleRun *nybble_run_2))
 {
@@ -198,8 +190,6 @@ static void ComputeTotalEncodedBits(State* const state)
 /***************/
 
 /* https://en.wikipedia.org/wiki/Shannon%E2%80%93Fano_coding */
-
-#ifdef FANO_CODING
 
 static unsigned int TotalValidRuns(State* const state)
 {
@@ -351,8 +341,6 @@ static void ComputeCodesFano(State* const state)
 	}
 }
 
-#endif
-
 /**********************/
 /* End of Fano Coding */
 /**********************/
@@ -365,8 +353,6 @@ static void ComputeCodesFano(State* const state)
 /* https://en.wikipedia.org/wiki/Package-merge_algorithm */
 /* https://create.stephan-brumme.com/length-limited-prefix-codes/ */
 /* https://experiencestack.co/length-limited-huffman-codes-21971f021d43 */
-
-#ifdef HUFFMAN_CODING
 
 static void CreateLeafNode(State* const state, const unsigned int run_nybble, const unsigned int run_length_minus_one)
 {
@@ -631,8 +617,6 @@ static void ComputeCodesHuffman(State* const state)
 	ComputeCodesFromLengths(state);
 }
 
-#endif
-
 /*************************/
 /* End of Huffman Coding */
 /*************************/
@@ -729,7 +713,7 @@ static void ResetNybbleRun(State* const state, const unsigned int run_nybble, co
 	nybble_run->occurrences = nybble_run->code = nybble_run->total_code_bits = 0;
 }
 
-static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_mode_enabled)
+static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_mode_enabled, const cc_bool accurate)
 {
 	state->xor_mode_enabled = xor_mode_enabled;
 
@@ -741,22 +725,21 @@ static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_m
 	FindRuns(state, LogOccurrence);
 
 	/* Do the coding-specific tasks. */
-#if defined(FANO_CODING)
-	ComputeCodesFano(state);
-#elif defined(HUFFMAN_CODING)
-	ComputeCodesHuffman(state);
-#endif
+	if (accurate)
+		ComputeCodesFano(state);
+	else
+		ComputeCodesHuffman(state);
 
 	ComputeTotalEncodedBits(state);
 
 	return state->total_bits / 8; /* This division is needed in order for Sonic 1's Basaran tiles to compress accurately. Sega's compressor only counted the bytes, not the bits. */
 }
 
-static void ComputeCodes(State* const state)
+static void ComputeCodes(State* const state, const cc_bool accurate)
 {
 	/* Process the input data in both regular and XOR mode, seeing which produces the smaller data. */
-	const unsigned int total_bytes_regular_mode = ComputeCodesInternal(state, cc_false);
-	const unsigned int total_bytes_xor_mode = ComputeCodesInternal(state, cc_true);
+	const unsigned int total_bytes_regular_mode = ComputeCodesInternal(state, cc_false, accurate);
+	const unsigned int total_bytes_xor_mode = ComputeCodesInternal(state, cc_true, accurate);
 
 #ifdef CLOWNNEMESIS_DEBUG
 	fprintf(stderr, "Regular: %d bytes.\nXOR:     %d bytes.\n", total_bytes_regular_mode, total_bytes_xor_mode);
@@ -765,7 +748,7 @@ static void ComputeCodes(State* const state)
 	/* If regular mode was smaller or equivalent, then process the data in that mode again since it's currently in XOR mode still. */
 	/* Avoid this third pass by caching the first two. */
 	if (total_bytes_regular_mode <= total_bytes_xor_mode)
-		ComputeCodesInternal(state, cc_false);
+		ComputeCodesInternal(state, cc_false, accurate);
 }
 
 static void EmitHeader(State* const state)
@@ -898,7 +881,7 @@ static void EmitCodes(State* const state)
 		WriteByte(&state->common, (state->output_byte_buffer << (8 - state->output_bits_done)) & 0xFF);
 }
 
-int ClownNemesis_Compress(const ClownNemesis_InputCallback read_byte, const void* const read_byte_user_data, const ClownNemesis_OutputCallback write_byte, const void* const write_byte_user_data)
+int ClownNemesis_Compress(const int accurate, const ClownNemesis_InputCallback read_byte, const void* const read_byte_user_data, const ClownNemesis_OutputCallback write_byte, const void* const write_byte_user_data)
 {
 	int success;
 	State state = {0};
@@ -910,7 +893,7 @@ int ClownNemesis_Compress(const ClownNemesis_InputCallback read_byte, const void
 
 	if (!setjmp(state.common.jump_buffer))
 	{
-		ComputeCodes(&state);
+		ComputeCodes(&state, accurate != 0);
 
 		EmitHeader(&state);
 		EmitCodeTable(&state);

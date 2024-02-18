@@ -88,7 +88,7 @@ static int WriteByteToMemoryStream(void* const user_data, const unsigned char by
 	return byte;
 }
 
-int main(const int argc, char** const argv)
+static void DoTests(const cc_bool accurate)
 {
 	size_t total_uncompressed_size, total_original_compressed_size, total_new_compressed_size;
 	MemoryStream compressed_memory_stream, decompressed_memory_stream, compressed_memory_stream_2, decompressed_memory_stream_2;
@@ -456,9 +456,6 @@ int main(const int argc, char** const argv)
 		"../tests/s2disasm/art/nemesis/Window in back that Robotnik looks through in DEZ.nem",
 	};
 
-	(void)argc;
-	(void)argv;
-
 	total_uncompressed_size = total_original_compressed_size = total_new_compressed_size = 0;
 
 	MemoryStream_Initialise(&compressed_memory_stream);
@@ -503,7 +500,7 @@ int main(const int argc, char** const argv)
 			}
 			else
 			{
-				if (!ClownNemesis_Compress(ReadByteFromMemoryStream, &decompressed_memory_stream, WriteByteToMemoryStream, &compressed_memory_stream_2))
+				if (!ClownNemesis_Compress(accurate, ReadByteFromMemoryStream, &decompressed_memory_stream, WriteByteToMemoryStream, &compressed_memory_stream_2))
 				{
 					fprintf(stdout, "Could not compress file '%s'.\n", file_path);
 				}
@@ -525,10 +522,8 @@ int main(const int argc, char** const argv)
 							total_uncompressed_size += decompressed_memory_stream.write_index;
 							total_new_compressed_size += compressed_memory_stream_2.write_index;
 
-						#if 0 /* For testing the accuracy of the Fano encoder to Sega's compressor. */
-							if (compressed_memory_stream.write_index != compressed_memory_stream_2.write_index || memcmp(compressed_memory_stream.buffer, compressed_memory_stream_2.buffer, compressed_memory_stream.write_index) != 0)
+							if (accurate && (compressed_memory_stream.write_index != compressed_memory_stream_2.write_index || memcmp(compressed_memory_stream.buffer, compressed_memory_stream_2.buffer, compressed_memory_stream.write_index) != 0))
 								fprintf(stdout, "Compressions of file '%s' do not match.\n", file_path);
-						#endif
 						}
 					}
 				}
@@ -542,6 +537,17 @@ int main(const int argc, char** const argv)
 	MemoryStream_Deinitialise(&decompressed_memory_stream_2);
 
 	fprintf(stdout, "Uncompressed size:   %ld\nOld compressed size: %ld\nNew compressed size: %ld\nNew vs. old: %f%%\n", (unsigned long)total_uncompressed_size, (unsigned long)total_original_compressed_size, (unsigned long)total_new_compressed_size, (double)total_new_compressed_size / total_original_compressed_size * 100);
+}
+
+int main(const int argc, char** const argv)
+{
+	(void)argc;
+	(void)argv;
+
+	fputs("Testing accurate compression...\n", stdout);
+	DoTests(cc_true);
+	fputs("\nTesting improved compression...\n", stdout);
+	DoTests(cc_false);
 
 	return EXIT_SUCCESS;
 }

@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "clowncommon/clowncommon.h"
+
 #include "compress.h"
 #include "decompress.h"
 
@@ -36,18 +38,52 @@ int main(const int argc, char** const argv)
 
 	if (argc < 4)
 	{
-		fprintf(stderr, "Usage: %s -c (or -d) input output\n", argv[0]);
+		const char* const usage =
+			"clownnemesis v1.0, by Clownacy.\n"
+			"This is a Nemesis compressor and decompressor, which can compress data\n"
+			"identically to Sega's original Nemesis compressor.\n"
+			"\n"
+			"Usage: %s options input output\n"
+			"\n"
+			"Options:\n"
+			"  -c  - Compress (better, but not accurate to Sega's compressor)\n"
+			"  -ca - Compress (worse, but accurate to Sega's compressor)\n"
+			"  -d  - Decompress\n";
+
+		fprintf(stderr, usage, argv[0]);
 	}
 	else
 	{
-		if (argv[1][0] != '-' || (argv[1][1] != 'c' && argv[1][1] != 'd') || argv[1][2] != '\0')
+		cc_bool compress, accurate, unrecognised;
+
+		unrecognised = cc_false;
+
+		if (argv[1][0] == '-' && argv[1][1] == 'c' && argv[1][2] == '\0')
 		{
-			fputs("Error: Could not open input file for reading.\n", stderr);
+			compress = cc_true;
+			accurate = cc_false;
+		}
+		else if (argv[1][0] == '-' && argv[1][1] == 'c' && argv[1][2] == 'a' && argv[1][3] == '\0')
+		{
+			compress = cc_true;
+			accurate = cc_true;
+		}
+		else if (argv[1][0] == '-' && argv[1][1] == 'd' && argv[1][2] == '\0')
+		{
+			compress = cc_false;
+			accurate = cc_false;
+		}
+		else
+		{
+			unrecognised = cc_true;
+		}
+
+		if (unrecognised)
+		{
+			fprintf(stderr, "Error: Unrecognised option '%s'.\n", argv[1]);
 		}			
 		else
 		{
-			const int compress = argv[1][1] == 'c';
-
 			FILE *const input_file = fopen(argv[2], "rb");
 
 			if (input_file == NULL)
@@ -64,20 +100,17 @@ int main(const int argc, char** const argv)
 				}
 				else
 				{
+					int success;
+
 					if (compress)
-					{
-						if (!ClownNemesis_Compress(InputCallback, input_file, OutputCallback, output_file))
-							fputs("Error: Could not compress data.\n", stderr);
-						else
-							exit_code = EXIT_SUCCESS;
-					}
+						success = ClownNemesis_Compress(accurate, InputCallback, input_file, OutputCallback, output_file);
 					else
-					{
-						if (!ClownNemesis_Decompress(InputCallback, input_file, OutputCallback, output_file))
-							fputs("Error: Could not decompress data.\n", stderr);
-						else
-							exit_code = EXIT_SUCCESS;
-					}
+						success = ClownNemesis_Decompress(InputCallback, input_file, OutputCallback, output_file);
+
+					if (!success)
+						fputs("Error: Could not decompress data.\n", stderr);
+					else
+						exit_code = EXIT_SUCCESS;
 
 					fclose(output_file);
 				}
