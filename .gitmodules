@@ -7,3 +7,6 @@
 [submodule "tests/s2disasm"]
 	path = tests/s2disasm
 	url = https://github.com/sonicretro/s2disasm
+[submodule "tests/skdisasm"]
+	path = tests/skdisasm
+	url = https://github.com/sonicretro/skdisasm
