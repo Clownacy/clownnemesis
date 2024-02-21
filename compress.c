@@ -746,7 +746,7 @@ static void ComputeCodes(State* const state, const cc_bool accurate)
 #endif
 
 	/* If regular mode was smaller or equivalent, then process the data in that mode again since it's currently in XOR mode still. */
-	/* Avoid this third pass by caching the first two. */
+	/* TODO: Avoid this third pass by caching the first two. */
 	if (total_bytes_regular_mode <= total_bytes_xor_mode)
 		ComputeCodesInternal(state, cc_false, accurate);
 }
