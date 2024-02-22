@@ -166,8 +166,17 @@ static void ProcessCodeTable(State* const state)
 			const unsigned char run_length = ((byte >> 4) & 7) + 1;
 			const unsigned char total_code_bits = byte & 0xF;
 			const unsigned char code = ReadByte(&state->common);
+			const unsigned int nybble_run_index = (unsigned int)code << (8u - total_code_bits);
+			NybbleRun* const nybble_run = &state->nybble_runs[nybble_run_index];
 
-			NybbleRun* const nybble_run = &state->nybble_runs[code << (8 - total_code_bits)];
+			if (total_code_bits > 8 || total_code_bits == 0 || nybble_run_index > CC_COUNT_OF(state->nybble_runs))
+			{
+			#ifdef CLOWNNEMESIS_DEBUG
+				fputs("Invalid code table entry.\n", stderr);
+			#endif
+				longjmp(state->common.jump_buffer, 1);
+			}
+
 			nybble_run->total_code_bits = total_code_bits;
 			nybble_run->value = nybble_run_value;
 			nybble_run->length = run_length;
