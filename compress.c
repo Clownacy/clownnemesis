@@ -871,20 +871,23 @@ static void EmitCode(State* const state, const unsigned int run_nybble, const un
 	}
 }
 
-static void EmitCodes(State* const state)
+static void EmitCodes(State* const state, const cc_bool accurate)
 {
 	/* TODO: Use clownlzss to find the most efficient way of encoding the uncompressed data using the available codes. */
 	FindRuns(state, EmitCode);
 
 	/* Output any codes that haven't yet been flushed. */
-	if (state->output_bits_done != 0)
+	/* Foolishly, Sega's compressor would redundantly emit an empty byte here if there are no unflushed bits. */
+	if (state->output_bits_done != 0 || accurate)
 		WriteByte(&state->common, (state->output_byte_buffer << (8 - state->output_bits_done)) & 0xFF);
 }
 
-int ClownNemesis_Compress(const int accurate, const ClownNemesis_InputCallback read_byte, const void* const read_byte_user_data, const ClownNemesis_OutputCallback write_byte, const void* const write_byte_user_data)
+int ClownNemesis_Compress(const int accurate_int, const ClownNemesis_InputCallback read_byte, const void* const read_byte_user_data, const ClownNemesis_OutputCallback write_byte, const void* const write_byte_user_data)
 {
 	int success;
 	State state = {0};
+
+	const cc_bool accurate = accurate_int != 0;
 
 	success = 0;
 
@@ -893,11 +896,11 @@ int ClownNemesis_Compress(const int accurate, const ClownNemesis_InputCallback r
 
 	if (!setjmp(state.common.jump_buffer))
 	{
-		ComputeCodes(&state, accurate != 0);
+		ComputeCodes(&state, accurate);
 
 		EmitHeader(&state);
 		EmitCodeTable(&state);
-		EmitCodes(&state);
+		EmitCodes(&state, accurate);
 
 		success = 1;
 	}
