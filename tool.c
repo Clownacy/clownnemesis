@@ -39,7 +39,7 @@ int main(const int argc, char** const argv)
 	if (argc < 4)
 	{
 		const char* const usage =
-			"clownnemesis v1.0, by Clownacy.\n"
+			"clownnemesis v1.1, by Clownacy.\n"
 			"This is a Nemesis compressor and decompressor, which can compress data\n"
 			"identically to Sega's original Nemesis compressor.\n"
 			"\n"
