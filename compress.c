@@ -732,7 +732,9 @@ static unsigned int ComputeCodesInternal(State* const state, const cc_bool xor_m
 
 	ComputeTotalEncodedBits(state);
 
-	return state->total_bits / 8; /* This division is needed in order for Sonic 1's Basaran tiles to compress accurately. Sega's compressor only counted the bytes, not the bits. */
+	/* This division is needed in order for Sonic 1's Basaran tiles to compress accurately. Sega's compressor only counted the bytes, not the bits. */
+	/* This division must round up in order for Sonic 3's Buggernaut tiles to compress accurately. */
+	return CC_DIVIDE_CEILING(state->total_bits, 8);
 }
 
 static void ComputeCodes(State* const state, const cc_bool accurate)
