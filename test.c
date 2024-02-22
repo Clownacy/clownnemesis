@@ -598,7 +598,7 @@ static void DoTests(const cc_bool accurate)
 								if ((compressed_memory_stream.write_index < compressed_memory_stream_2.write_index || memcmp(compressed_memory_stream.buffer, compressed_memory_stream_2.buffer, compressed_memory_stream_2.write_index) != 0))
 									fprintf(stdout, "Compressions of file '%s' do not match.\n", file_path);
 								else if (compressed_memory_stream.write_index > compressed_memory_stream_2.write_index)
-									fprintf(stdout, "File '%s' has junk data at the end.\n", file_path);
+									fprintf(stdout, "File '%s' has %ld bytes of junk data at the end.\n", file_path, (unsigned long)(compressed_memory_stream.write_index - compressed_memory_stream_2.write_index));
 							}
 						}
 					}
