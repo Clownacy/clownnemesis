@@ -108,9 +108,16 @@ int main(const int argc, char** const argv)
 						success = ClownNemesis_Decompress(InputCallback, input_file, OutputCallback, output_file);
 
 					if (!success)
-						fputs("Error: Could not decompress data.\n", stderr);
+					{
+						if (compress)
+							fputs("Error: Could not compress data.\nThe input data is either too large or its size is not a multiple of 0x20 bytes.\n", stderr);
+						else
+							fputs("Error: Could not decompress data. The input data is not valid Nemesis data.\n", stderr);
+					}
 					else
+					{
 						exit_code = EXIT_SUCCESS;
+					}
 
 					fclose(output_file);
 				}
